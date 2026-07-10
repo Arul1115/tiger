@@ -225,6 +225,21 @@ table.table td,table.table th{font-size:.85rem;vertical-align:middle;}
   </div>
 </div>
 
+<!-- Hidden transport for document upload/replace/delete.
+     Submitted as a real form POST into a hidden iframe (not fetch/XHR) so it
+     is a plain browser navigation and is never subject to CORS preflight,
+     which Apps Script Web Apps cannot answer. See SETUP_INSTRUCTIONS.md. -->
+<form id="docUploadForm" method="POST" enctype="multipart/form-data" target="docUploadFrame" style="display:none">
+  <input type="hidden" name="action" id="docFormAction">
+  <input type="hidden" name="fileName" id="docFormFileName">
+  <input type="hidden" name="category" id="docFormCategory">
+  <input type="hidden" name="uploadedBy" id="docFormUploadedBy">
+  <input type="hidden" name="oldFileId" id="docFormOldFileId">
+  <input type="hidden" name="fileId" id="docFormFileId">
+  <input type="file" name="file" id="docFileInput" accept="application/pdf,.pdf">
+</form>
+<iframe name="docUploadFrame" id="docUploadFrame" style="display:none"></iframe>
+
 <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastHost"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -765,8 +780,23 @@ function printModule(key){
    Drive via a Google Apps Script backend; only metadata (fileId,
    name, size, links, who/when) is stored on the Firestore record
    under the field named in docType.field.
+
+   TRANSPORT NOTE: Upload/Replace/Delete are submitted as a real
+   <form> POST into a hidden <iframe> (docUploadForm / docUploadFrame),
+   not via fetch/XHR. Apps Script Web Apps cannot answer a CORS
+   preflight (OPTIONS) request, and modern Chrome preflights any
+   fetch/XHR call to a URL that redirects cross-origin — which every
+   Apps Script /exec URL does internally. A <form> submission is a
+   plain browser navigation, so it is never subject to CORS/preflight.
+   Apps Script reports the result back via window.postMessage, which
+   the listener below picks up. One consequence: the browser no longer
+   gives us real upload-percentage events for this transport, so the
+   progress UI shows an animated "in progress" bar with an elapsed-time
+   counter instead of a percentage.
    ============================================================ */
 let docCtx = null; // { key, id }
+let pendingDocOperation = null; // { type: 'upload'|'replace'|'delete', key, id }
+let docOperationTimer = null;
 
 function clientNameFor(clientCode){
   const c = state.clients.find(x=>x.clientCode===clientCode);
@@ -812,8 +842,10 @@ function renderDocCard(){
 
   const progressHtml = `
     <div id="docProgressWrap" class="mt-3 d-none">
-      <div class="d-flex justify-content-between small mb-1"><span>Uploading...</span><span id="docProgressPct">0%</span></div>
-      <div class="progress"><div id="docProgressBar" class="progress-bar bg-primary" style="width:0%"></div></div>
+      <div class="d-flex justify-content-between small mb-1">
+        <span id="docProgressLabel">Working...</span><span id="docProgressTime">0s</span>
+      </div>
+      <div class="progress"><div id="docProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" style="width:100%"></div></div>
     </div>`;
 
   if(meta && meta.fileId){
@@ -835,10 +867,9 @@ function renderDocCard(){
           <button class="btn btn-sm btn-outline-primary" onclick="previewDoc()"><i class="bi bi-eye"></i> Preview</button>
           <button class="btn btn-sm btn-outline-secondary" onclick="downloadDoc()"><i class="bi bi-download"></i> Download</button>
           <button class="btn btn-sm btn-outline-warning" id="docReplaceBtn" onclick="triggerReplace()"><i class="bi bi-arrow-repeat"></i> Replace</button>
-          <button class="btn btn-sm btn-outline-danger" onclick="deleteDocFile()"><i class="bi bi-trash"></i> Delete</button>
+          <button class="btn btn-sm btn-outline-danger" id="docDeleteBtn" onclick="deleteDocFile()"><i class="bi bi-trash"></i> Delete</button>
         </div>
       </div>
-      <input type="file" id="docFileInput" accept="application/pdf,.pdf" class="d-none" onchange="handleFileSelected()">
       ${progressHtml}`;
   } else {
     body.innerHTML = `
@@ -850,7 +881,6 @@ function renderDocCard(){
         </button>
         <div class="small text-muted mt-2">PDF only, up to 20 MB</div>
       </div>
-      <input type="file" id="docFileInput" accept="application/pdf,.pdf" class="d-none" onchange="handleFileSelected()">
       ${progressHtml}`;
   }
 }
@@ -881,6 +911,35 @@ function triggerReplace(){
   document.getElementById('docFileInput').click();
 }
 
+function setDocBusy(busy){
+  const wrap = document.getElementById('docProgressWrap');
+  if(wrap) wrap.classList.toggle('d-none', !busy);
+  ['docUploadBtn','docReplaceBtn','docDeleteBtn'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.disabled = busy;
+  });
+}
+function startDocTimer(){
+  const start = Date.now();
+  clearInterval(docOperationTimer);
+  docOperationTimer = setInterval(()=>{
+    const el = document.getElementById('docProgressTime');
+    if(el) el.textContent = Math.round((Date.now()-start)/1000)+'s';
+  },1000);
+}
+function stopDocTimer(){ clearInterval(docOperationTimer); docOperationTimer=null; }
+
+function scheduleDocTimeout(){
+  clearTimeout(window.__docOpTimeout);
+  window.__docOpTimeout = setTimeout(()=>{
+    if(pendingDocOperation){
+      pendingDocOperation = null;
+      stopDocTimer(); setDocBusy(false);
+      toast('The request timed out. Google Drive may be unavailable — please check your connection and try again.','danger');
+    }
+  }, 60000);
+}
+
 function deleteDocFile(){
   if(!confirm('Delete this document permanently? This cannot be undone.')) return;
   const {key,id}=docCtx; const cfg=MODULES[key];
@@ -888,27 +947,18 @@ function deleteDocFile(){
   const meta = record[cfg.docType.field];
   if(!meta || !meta.fileId){ toast('No document to delete','danger'); return; }
   if(!navigator.onLine){ toast('You appear to be offline. Please check your internet connection.','danger'); return; }
+  if(!isAppsScriptConfigured()){ toast('Document management is not configured yet.','danger'); return; }
 
-  callAppsScript({action:'delete', fileId: meta.fileId})
-    .then(res=>{
-      if(res && res.success){
-        const update={}; update[cfg.docType.field] = firebase.firestore.FieldValue.delete();
-        return db.collection(cfg.collection).doc(id).update(update).then(()=>{
-          toast('Document deleted');
-          logActivity('Deleted '+cfg.docType.label+' for '+(record[cfg.docType.numberField]||id));
-          record[cfg.docType.field]=null;
-          renderDocCard();
-        });
-      } else {
-        toast('Delete failed: '+(res&&res.error?res.error:'Google Drive did not confirm the delete'),'danger');
-      }
-    })
-    .catch(err=>{
-      toast('Delete failed. Google Drive may be unavailable: '+err.message,'danger');
-    });
+  document.getElementById('docFileInput').value = ''; // don't resend a stale selected file
+  document.getElementById('docProgressLabel').textContent = 'Deleting from Google Drive...';
+  setDocBusy(true); startDocTimer();
+
+  pendingDocOperation = { type:'delete', key, id };
+  scheduleDocTimeout();
+  submitDocForm('delete', { fileId: meta.fileId });
 }
 
-function handleFileSelected(){
+function handleFileSelectedFromInput(){
   const input = document.getElementById('docFileInput');
   const file = input.files && input.files[0];
   if(!file) return;
@@ -919,97 +969,98 @@ function handleFileSelected(){
   if(file.size > MAX_DOC_SIZE_BYTES){ toast('File exceeds the 20 MB limit','danger'); input.value=''; return; }
   if(!navigator.onLine){ toast('No internet connection. Please reconnect and try again.','danger'); input.value=''; return; }
   if(!isAppsScriptConfigured()){ toast('Document upload is not configured yet.','danger'); return; }
+  if(!docCtx) return;
 
   const {key,id}=docCtx; const cfg=MODULES[key];
   const record = state[key].find(r=>r.id===id);
   const fileName = buildDocFileName(cfg, record);
   const oldMeta = record[cfg.docType.field];
   const oldFileId = oldMeta ? oldMeta.fileId : null;
+  const action = oldFileId ? 'replace' : 'upload';
 
-  const reader = new FileReader();
-  reader.onload = function(){
-    const base64 = reader.result.split(',')[1];
-    uploadDocument({
-      action: oldFileId ? 'replace' : 'upload',
-      oldFileId: oldFileId || null,
-      fileName, base64, mimeType:'application/pdf',
-      category: cfg.docType.category, uploadedBy: state.name
-    });
-  };
-  reader.onerror = function(){ toast('Failed to read the selected file','danger'); };
-  reader.readAsDataURL(file);
+  document.getElementById('docProgressLabel').textContent = (action==='replace'?'Replacing':'Uploading')+' document...';
+  setDocBusy(true); startDocTimer();
+
+  pendingDocOperation = { type:action, key, id };
+  scheduleDocTimeout();
+  submitDocForm(action, { fileName, category: cfg.docType.category, uploadedBy: state.name, oldFileId });
 }
 
-function uploadDocument(payload){
-  const wrap = document.getElementById('docProgressWrap');
-  const bar = document.getElementById('docProgressBar');
-  const pct = document.getElementById('docProgressPct');
-  wrap.classList.remove('d-none'); bar.style.width='0%'; pct.textContent='0%';
-  const btn = document.getElementById('docUploadBtn') || document.getElementById('docReplaceBtn');
-  if(btn) btn.disabled = true;
+function submitDocForm(action, params){
+  const form = document.getElementById('docUploadForm');
+  form.action = APPS_SCRIPT_URL;
+  document.getElementById('docFormAction').value = action;
+  document.getElementById('docFormFileName').value = params.fileName || '';
+  document.getElementById('docFormCategory').value = params.category || '';
+  document.getElementById('docFormUploadedBy').value = params.uploadedBy || '';
+  document.getElementById('docFormOldFileId').value = params.oldFileId || '';
+  document.getElementById('docFormFileId').value = params.fileId || '';
+  form.submit();
+}
 
-  const xhr = new XMLHttpRequest();
-  xhr.open('POST', APPS_SCRIPT_URL, true);
-  // IMPORTANT: do NOT call setRequestHeader here. Apps Script Web Apps don't
-  // implement an OPTIONS handler, so setting any header (even Content-Type:
-  // text/plain) makes Chrome send a CORS preflight that Apps Script can't
-  // answer, and the whole request gets blocked. Leaving headers untouched
-  // means the browser sends the default "text/plain;charset=UTF-8" content
-  // type for a string body, which stays a "simple" request and skips preflight.
-  xhr.upload.onprogress = function(e){
-    if(e.lengthComputable){
-      const p = Math.round((e.loaded/e.total)*100);
-      bar.style.width=p+'%'; pct.textContent=p+'%';
-    }
-  };
-  xhr.onload = function(){
-    if(btn) btn.disabled=false;
-    let res;
-    try{ res = JSON.parse(xhr.responseText); }
-    catch(e){ toast('Upload failed: unexpected response from Google Drive service','danger'); wrap.classList.add('d-none'); return; }
+// Apps Script posts its JSON result back to us from the hidden iframe.
+window.addEventListener('message', function(ev){
+  if(!pendingDocOperation) return;
+  let res = ev.data;
+  if(typeof res === 'string'){
+    try{ res = JSON.parse(res); }catch(e){ return; }
+  }
+  if(!res || typeof res !== 'object' || !('success' in res)) return;
 
-    if(xhr.status>=200 && xhr.status<300 && res && res.success){
-      const {key,id}=docCtx; const cfg=MODULES[key];
-      const meta = {
-        fileId: res.fileId, fileName: res.fileName, fileSize: res.fileSize,
-        viewUrl: res.viewUrl, downloadUrl: res.downloadUrl,
-        uploadedAt: res.uploadedAt, uploadedBy: res.uploadedBy || payload.uploadedBy,
-        lastUpdated: new Date().toISOString()
-      };
-      const update={}; update[cfg.docType.field]=meta;
-      db.collection(cfg.collection).doc(id).update(update).then(()=>{
-        toast('Document uploaded successfully');
-        logActivity((payload.action==='replace'?'Replaced ':'Uploaded ')+cfg.docType.label+' for '+ (state[key].find(r=>r.id===id)[cfg.docType.numberField]||id));
-        const record = state[key].find(r=>r.id===id);
-        record[cfg.docType.field]=meta;
-        renderDocCard();
+  clearTimeout(window.__docOpTimeout);
+  stopDocTimer();
+  const op = pendingDocOperation;
+  pendingDocOperation = null;
+
+  const cfg = MODULES[op.key];
+  const record = state[op.key].find(r=>r.id===op.id);
+  if(!record){ setDocBusy(false); return; }
+
+  if(op.type === 'delete'){
+    if(res.success){
+      const update={}; update[cfg.docType.field] = firebase.firestore.FieldValue.delete();
+      db.collection(cfg.collection).doc(op.id).update(update).then(()=>{
+        toast('Document deleted');
+        logActivity('Deleted '+cfg.docType.label+' for '+(record[cfg.docType.numberField]||op.id));
+        record[cfg.docType.field]=null;
+        if(docCtx && docCtx.key===op.key && docCtx.id===op.id) renderDocCard();
       }).catch(err=>{
-        toast('Uploaded to Drive, but saving to CRM failed: '+err.message,'danger');
+        setDocBusy(false);
+        toast('Deleted from Drive, but updating the CRM failed: '+err.message,'danger');
       });
     } else {
-      toast('Upload failed: '+(res&&res.error? res.error : 'Google Drive returned an error'),'danger');
-      wrap.classList.add('d-none');
+      setDocBusy(false);
+      toast('Delete failed: '+(res.error||'Google Drive did not confirm the delete'),'danger');
     }
-  };
-  xhr.onerror = function(){
-    if(btn) btn.disabled=false;
-    toast('Upload failed. Google Drive may be unavailable — please check your connection.','danger');
-    wrap.classList.add('d-none');
-  };
-  xhr.send(JSON.stringify(payload));
-}
+    return;
+  }
 
-function callAppsScript(payload){
-  // No custom headers here either — same CORS-preflight reason as the
-  // upload XHR above. A plain string body keeps this a "simple" request.
-  return fetch(APPS_SCRIPT_URL, {
-    method:'POST',
-    body: JSON.stringify(payload)
-  }).then(r=>{
-    if(!r.ok) throw new Error('Server responded with status '+r.status);
-    return r.json();
-  });
-}
+  // upload / replace
+  if(res.success){
+    const meta = {
+      fileId: res.fileId, fileName: res.fileName, fileSize: res.fileSize,
+      viewUrl: res.viewUrl, downloadUrl: res.downloadUrl,
+      uploadedAt: res.uploadedAt, uploadedBy: res.uploadedBy,
+      lastUpdated: new Date().toISOString()
+    };
+    const update={}; update[cfg.docType.field]=meta;
+    db.collection(cfg.collection).doc(op.id).update(update).then(()=>{
+      toast('Document uploaded successfully');
+      logActivity((op.type==='replace'?'Replaced ':'Uploaded ')+cfg.docType.label+' for '+(record[cfg.docType.numberField]||op.id));
+      record[cfg.docType.field]=meta;
+      if(docCtx && docCtx.key===op.key && docCtx.id===op.id) renderDocCard();
+    }).catch(err=>{
+      setDocBusy(false);
+      toast('Uploaded to Drive, but saving to CRM failed: '+err.message,'danger');
+    });
+  } else {
+    setDocBusy(false);
+    toast('Upload failed: '+(res.error||'Google Drive returned an error'),'danger');
+  }
+});
+
+document.getElementById('docFileInput').addEventListener('change', handleFileSelectedFromInput);
+
 
 /* ================= AUTO SALES COMMISSION ================= */
 async function autoCreateSalesCommission(mc){
