@@ -773,23 +773,34 @@ function printModule(key){
    project); only metadata (fileId, name, size, links, who/when)
    is stored on the Firestore record under docType.field.
 
-   TRANSPORT: upload/replace/delete are sent as a single JSON
-   payload via fetch()/XMLHttpRequest, with the PDF itself encoded
-   as base64 text inside that payload, and the request's
-   Content-Type set to "text/plain". That keeps the browser
-   treating it as a CORS "simple request" (no OPTIONS preflight,
-   which Apps Script Web Apps cannot answer), while still letting
-   our JS read the real JSON response back directly — no hidden
-   iframe, no window.postMessage guesswork, and real upload
-   progress via XMLHttpRequest's upload.onprogress event.
+   TRANSPORT (updated): Apps Script Web Apps redirect every request
+   to script.googleusercontent.com to serve the actual response.
+   Chrome forces a CORS preflight (OPTIONS) whenever a cross-origin
+   request results in a cross-origin redirect, REGARDLESS of how
+   "simple" the original request's headers are — and Apps Script has
+   no way to answer an OPTIONS preflight. So no fetch/XHR call that
+   expects to read the JSON response back directly can ever work
+   here; it will always fail with the CORS error you saw.
 
-   Preview/Download are NOT proxied through the script at all —
-   every uploaded file is shared as "Anyone with the link — Viewer",
-   and the CRM uses the returned Drive links directly.
+   The fix: split each operation into two legs that are each,
+   individually, exempt from CORS entirely:
+     1) UPLOAD/SEND: a fetch(...,{mode:'no-cors'}) POST. no-cors
+        requests are allowed to cross origins (like a tracking
+        pixel/beacon) but the browser refuses to let JS read the
+        response — that's fine, because we don't need to read it.
+     2) RESULT: a JSONP poll — a plain <script src="...&callback=fn">
+        tag. Script tag loads are not subject to CORS/preflight at
+        all. Apps Script stores the job result in CacheService keyed
+        by a jobId the client generates, and the poll endpoint
+        returns it wrapped as `fn(result)`.
+   Trade-off: fetch's no-cors mode does not expose upload progress
+   events, so the progress bar below now shows an indeterminate
+   "working..." animation during the send phase instead of a real
+   percentage, then switches to "processing..." during polling.
    ============================================================ */
 let docCtx = null;              // { key, id }
 let pendingDocOperation = null; // { type: 'upload'|'replace'|'delete', key, id }
-let docXhr = null;
+let docPollTimer = null;
 
 function clientNameFor(clientCode){
   const c = state.clients.find(x=>x.clientCode===clientCode);
@@ -836,9 +847,9 @@ function renderDocCard(){
   const progressHtml = `
     <div id="docProgressWrap" class="mt-3 d-none">
       <div class="d-flex justify-content-between small mb-1">
-        <span id="docProgressLabel">Working...</span><span id="docProgressPct">0%</span>
+        <span id="docProgressLabel">Working...</span><span id="docProgressPct"></span>
       </div>
-      <div class="progress"><div id="docProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" style="width:0%"></div></div>
+      <div class="progress"><div id="docProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" style="width:100%"></div></div>
     </div>`;
 
   if(meta && meta.fileId){
@@ -912,23 +923,29 @@ function setDocBusy(busy){
     if(el) el.disabled = busy;
   });
 }
-function updateDocProgress(pct){
-  const bar = document.getElementById('docProgressBar');
-  const label = document.getElementById('docProgressPct');
-  if(bar) bar.style.width = pct+'%';
-  if(label) label.textContent = pct+'%';
+function updateDocProgress(label){
+  const l = document.getElementById('docProgressLabel');
+  if(l && label) l.textContent = label;
+}
+
+function makeJobId(){
+  return 'job_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
 }
 
 function scheduleDocTimeout(){
   clearTimeout(window.__docOpTimeout);
   window.__docOpTimeout = setTimeout(()=>{
     if(pendingDocOperation){
-      if(docXhr){ try{ docXhr.abort(); }catch(e){} docXhr=null; }
+      stopPolling();
       pendingDocOperation = null;
       setDocBusy(false);
       toast('The request timed out. Google Drive may be unavailable — please check your connection and try again.','danger');
     }
-  }, 120000); // large PDFs take longer to base64-encode and upload; 2 minutes
+  }, 120000); // large PDFs take longer to base64-encode, send, and process; 2 minutes
+}
+
+function stopPolling(){
+  if(docPollTimer){ clearTimeout(docPollTimer); docPollTimer=null; }
 }
 
 function deleteDocFile(){
@@ -941,10 +958,10 @@ function deleteDocFile(){
   if(!isAppsScriptConfigured()){ toast('Document management is not configured yet.','danger'); return; }
 
   document.getElementById('docFileInput').value = ''; // don't resend a stale selected file
-  document.getElementById('docProgressLabel').textContent = 'Deleting from Google Drive...';
-  setDocBusy(true); updateDocProgress(0);
+  updateDocProgress('Deleting from Google Drive...');
+  setDocBusy(true);
 
-  callAppsScript({ action:'delete', fileId: meta.fileId }, { type:'delete', key, id });
+  sendAppsScriptJob({ action:'delete', fileId: meta.fileId }, { type:'delete', key, id });
 }
 
 function handleFileSelectedFromInput(){
@@ -967,14 +984,14 @@ function handleFileSelectedFromInput(){
   const oldFileId = oldMeta ? oldMeta.fileId : null;
   const action = oldFileId ? 'replace' : 'upload';
 
-  document.getElementById('docProgressLabel').textContent = (action==='replace'?'Replacing':'Uploading')+' document...';
-  setDocBusy(true); updateDocProgress(0);
+  updateDocProgress((action==='replace'?'Replacing':'Uploading')+' document...');
+  setDocBusy(true);
 
   const reader = new FileReader();
   reader.onload = function(){
     const dataUrl = reader.result; // "data:application/pdf;base64,XXXXX"
     const base64 = (dataUrl.split(',')[1]) || '';
-    callAppsScript({
+    sendAppsScriptJob({
       action, fileName, category: cfg.docType.category, uploadedBy: state.name,
       oldFileId: oldFileId || '', mimeType: 'application/pdf', data: base64
     }, { type:action, key, id });
@@ -987,39 +1004,75 @@ function handleFileSelectedFromInput(){
   input.value = ''; // reset so selecting the same file again still fires 'change'
 }
 
-function callAppsScript(payload, opContext){
+/* ---- no-cors send + JSONP poll transport ---- */
+function sendAppsScriptJob(payload, opContext){
   pendingDocOperation = opContext;
   scheduleDocTimeout();
 
-  const xhr = new XMLHttpRequest();
-  docXhr = xhr;
-  xhr.open('POST', APPS_SCRIPT_URL, true);
-  xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8'); // keeps this a CORS "simple request"
+  const jobId = makeJobId();
+  payload.jobId = jobId;
 
-  xhr.upload.onprogress = function(ev){
-    if(ev.lengthComputable){
-      const pct = Math.min(99, Math.round((ev.loaded/ev.total)*100));
-      updateDocProgress(pct);
-    }
+  // Leg 1: fire the job. no-cors is exempt from CORS/preflight (including the
+  // redirect-triggered preflight), but we can't read anything back from it —
+  // that's expected, the result comes back over the JSONP poll below.
+  fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
+  }).catch(()=>{
+    // A network-level failure (e.g. truly offline) still rejects even in
+    // no-cors mode. An opaque "success" here does NOT mean the server
+    // actually accepted the job — that's confirmed only by the poll result.
+    pendingDocOperation = null;
+    stopPolling();
+    setDocBusy(false);
+    toast('Could not reach the document service. Check your connection and try again.','danger');
+  });
+
+  // Leg 2: start polling for the cached result via JSONP (script tag —
+  // never subject to CORS).
+  updateDocProgress('Processing...');
+  pollForResult(jobId, opContext, 0);
+}
+
+function pollForResult(jobId, opContext, attempt){
+  if(!pendingDocOperation || pendingDocOperation !== opContext){
+    // A newer operation superseded this one, or it was cancelled/timed out.
+    return;
+  }
+  const callbackName = '__docJobCb_' + jobId + '_' + attempt;
+  const script = document.createElement('script');
+
+  const cleanup = () => {
+    delete window[callbackName];
+    if(script.parentNode) script.parentNode.removeChild(script);
   };
 
-  xhr.onload = function(){
+  window[callbackName] = function(res){
+    cleanup();
+    if(!pendingDocOperation || pendingDocOperation !== opContext) return;
+    if(res && res.status === 'pending'){
+      docPollTimer = setTimeout(()=>pollForResult(jobId, opContext, attempt+1), 1500);
+      return;
+    }
+    stopPolling();
     clearTimeout(window.__docOpTimeout);
-    docXhr = null;
-    let res = null;
-    try{ res = JSON.parse(xhr.responseText); }catch(e){ res = null; }
     handleAppsScriptResult(res, opContext);
   };
 
-  xhr.onerror = function(){
-    clearTimeout(window.__docOpTimeout);
-    docXhr = null;
-    pendingDocOperation = null;
-    setDocBusy(false);
-    toast('The request failed. Check your connection and try again.','danger');
+  script.onerror = function(){
+    cleanup();
+    if(!pendingDocOperation || pendingDocOperation !== opContext) return;
+    // Transient network hiccup on the polling GET — keep trying until the
+    // overall operation timeout fires.
+    docPollTimer = setTimeout(()=>pollForResult(jobId, opContext, attempt+1), 2000);
   };
 
-  xhr.send(JSON.stringify(payload));
+  const url = APPS_SCRIPT_URL + '?action=poll&jobId=' + encodeURIComponent(jobId) +
+              '&callback=' + encodeURIComponent(callbackName) + '&_=' + Date.now();
+  script.src = url;
+  document.body.appendChild(script);
 }
 
 function handleAppsScriptResult(res, op){
@@ -1057,7 +1110,6 @@ function handleAppsScriptResult(res, op){
 
   // upload / replace
   if(res.success){
-    updateDocProgress(100);
     const meta = {
       fileId: res.fileId, fileName: res.fileName, fileSize: res.fileSize,
       viewUrl: res.viewUrl, downloadUrl: res.downloadUrl,
