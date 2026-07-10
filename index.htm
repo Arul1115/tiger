@@ -225,20 +225,12 @@ table.table td,table.table th{font-size:.85rem;vertical-align:middle;}
   </div>
 </div>
 
-<!-- Hidden transport for document upload/replace/delete.
-     Submitted as a real form POST into a hidden iframe (not fetch/XHR) so it
-     is a plain browser navigation and is never subject to CORS preflight,
-     which Apps Script Web Apps cannot answer. See SETUP_INSTRUCTIONS.md. -->
-<form id="docUploadForm" method="POST" enctype="multipart/form-data" target="docUploadFrame" style="display:none">
-  <input type="hidden" name="action" id="docFormAction">
-  <input type="hidden" name="fileName" id="docFormFileName">
-  <input type="hidden" name="category" id="docFormCategory">
-  <input type="hidden" name="uploadedBy" id="docFormUploadedBy">
-  <input type="hidden" name="oldFileId" id="docFormOldFileId">
-  <input type="hidden" name="fileId" id="docFormFileId">
-  <input type="file" name="file" id="docFileInput" accept="application/pdf,.pdf">
-</form>
-<iframe name="docUploadFrame" id="docUploadFrame" style="display:none"></iframe>
+<!-- Hidden file picker for document upload. The actual transfer to the
+     backend happens via fetch/XMLHttpRequest (see DOCUMENT MANAGEMENT
+     section below) sending the PDF as base64 text — NOT a form POST
+     into an iframe. This input is only used to open the OS file
+     picker and hand the selected File object to JS. -->
+<input type="file" id="docFileInput" accept="application/pdf,.pdf" style="display:none">
 
 <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastHost"></div>
 
@@ -264,10 +256,10 @@ const secondaryApp = firebase.initializeApp(firebaseConfig, "Secondary");
 const secondaryAuth = secondaryApp.auth();
 
 /* ================= DOCUMENT MANAGEMENT CONFIG =================
-   Paste the "Web app URL" you get after deploying the Google Apps
-   Script (see SETUP_INSTRUCTIONS.md) between the quotes below.
+   Paste the "Web app URL" from your "TATVA DOCUMENTS" Apps Script
+   project (Deploy > Manage deployments) between the quotes below.
    Everything else works automatically once this is set. */
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzd9Xtz4HHVJdDiAeaCgKIcpDxaezM_nMH7evofPdTupLEu2ff1ontL4dax8bfeerOpIw/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwmwIFN98aH0XtvYrGzMqqlrZZAJqbLAnMQLArb6gehBsxZgudmNZx8hzquELmeyoB7/exec";
 const MAX_DOC_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
 
 /* ================= STATE ================= */
@@ -777,26 +769,27 @@ function printModule(key){
    DOCUMENT MANAGEMENT
    Applies to Purchase Orders and Quotations (any module whose
    MODULES[key].docType is defined). Files are stored in Google
-   Drive via a Google Apps Script backend; only metadata (fileId,
-   name, size, links, who/when) is stored on the Firestore record
-   under the field named in docType.field.
+   Drive via a Google Apps Script backend ("TATVA DOCUMENTS"
+   project); only metadata (fileId, name, size, links, who/when)
+   is stored on the Firestore record under docType.field.
 
-   TRANSPORT NOTE: Upload/Replace/Delete are submitted as a real
-   <form> POST into a hidden <iframe> (docUploadForm / docUploadFrame),
-   not via fetch/XHR. Apps Script Web Apps cannot answer a CORS
-   preflight (OPTIONS) request, and modern Chrome preflights any
-   fetch/XHR call to a URL that redirects cross-origin — which every
-   Apps Script /exec URL does internally. A <form> submission is a
-   plain browser navigation, so it is never subject to CORS/preflight.
-   Apps Script reports the result back via window.postMessage, which
-   the listener below picks up. One consequence: the browser no longer
-   gives us real upload-percentage events for this transport, so the
-   progress UI shows an animated "in progress" bar with an elapsed-time
-   counter instead of a percentage.
+   TRANSPORT: upload/replace/delete are sent as a single JSON
+   payload via fetch()/XMLHttpRequest, with the PDF itself encoded
+   as base64 text inside that payload, and the request's
+   Content-Type set to "text/plain". That keeps the browser
+   treating it as a CORS "simple request" (no OPTIONS preflight,
+   which Apps Script Web Apps cannot answer), while still letting
+   our JS read the real JSON response back directly — no hidden
+   iframe, no window.postMessage guesswork, and real upload
+   progress via XMLHttpRequest's upload.onprogress event.
+
+   Preview/Download are NOT proxied through the script at all —
+   every uploaded file is shared as "Anyone with the link — Viewer",
+   and the CRM uses the returned Drive links directly.
    ============================================================ */
-let docCtx = null; // { key, id }
+let docCtx = null;              // { key, id }
 let pendingDocOperation = null; // { type: 'upload'|'replace'|'delete', key, id }
-let docOperationTimer = null;
+let docXhr = null;
 
 function clientNameFor(clientCode){
   const c = state.clients.find(x=>x.clientCode===clientCode);
@@ -835,17 +828,17 @@ function renderDocCard(){
   if(!isAppsScriptConfigured()){
     body.innerHTML = `<div class="alert alert-warning small mb-0">
       Document upload is not configured yet. Open this file's script section, paste your
-      Google Apps Script Web App URL into <code>APPS_SCRIPT_URL</code>, and re-save the CRM file.
-      See SETUP_INSTRUCTIONS.md for the exact steps.</div>`;
+      "TATVA DOCUMENTS" Apps Script Web App URL into <code>APPS_SCRIPT_URL</code>, and re-save
+      the CRM file. See SETUP_INSTRUCTIONS.md for the exact steps.</div>`;
     return;
   }
 
   const progressHtml = `
     <div id="docProgressWrap" class="mt-3 d-none">
       <div class="d-flex justify-content-between small mb-1">
-        <span id="docProgressLabel">Working...</span><span id="docProgressTime">0s</span>
+        <span id="docProgressLabel">Working...</span><span id="docProgressPct">0%</span>
       </div>
-      <div class="progress"><div id="docProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" style="width:100%"></div></div>
+      <div class="progress"><div id="docProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" style="width:0%"></div></div>
     </div>`;
 
   if(meta && meta.fileId){
@@ -919,25 +912,23 @@ function setDocBusy(busy){
     if(el) el.disabled = busy;
   });
 }
-function startDocTimer(){
-  const start = Date.now();
-  clearInterval(docOperationTimer);
-  docOperationTimer = setInterval(()=>{
-    const el = document.getElementById('docProgressTime');
-    if(el) el.textContent = Math.round((Date.now()-start)/1000)+'s';
-  },1000);
+function updateDocProgress(pct){
+  const bar = document.getElementById('docProgressBar');
+  const label = document.getElementById('docProgressPct');
+  if(bar) bar.style.width = pct+'%';
+  if(label) label.textContent = pct+'%';
 }
-function stopDocTimer(){ clearInterval(docOperationTimer); docOperationTimer=null; }
 
 function scheduleDocTimeout(){
   clearTimeout(window.__docOpTimeout);
   window.__docOpTimeout = setTimeout(()=>{
     if(pendingDocOperation){
+      if(docXhr){ try{ docXhr.abort(); }catch(e){} docXhr=null; }
       pendingDocOperation = null;
-      stopDocTimer(); setDocBusy(false);
+      setDocBusy(false);
       toast('The request timed out. Google Drive may be unavailable — please check your connection and try again.','danger');
     }
-  }, 60000);
+  }, 120000); // large PDFs take longer to base64-encode and upload; 2 minutes
 }
 
 function deleteDocFile(){
@@ -951,11 +942,9 @@ function deleteDocFile(){
 
   document.getElementById('docFileInput').value = ''; // don't resend a stale selected file
   document.getElementById('docProgressLabel').textContent = 'Deleting from Google Drive...';
-  setDocBusy(true); startDocTimer();
+  setDocBusy(true); updateDocProgress(0);
 
-  pendingDocOperation = { type:'delete', key, id };
-  scheduleDocTimeout();
-  submitDocForm('delete', { fileId: meta.fileId });
+  callAppsScript({ action:'delete', fileId: meta.fileId }, { type:'delete', key, id });
 }
 
 function handleFileSelectedFromInput(){
@@ -979,38 +968,68 @@ function handleFileSelectedFromInput(){
   const action = oldFileId ? 'replace' : 'upload';
 
   document.getElementById('docProgressLabel').textContent = (action==='replace'?'Replacing':'Uploading')+' document...';
-  setDocBusy(true); startDocTimer();
+  setDocBusy(true); updateDocProgress(0);
 
-  pendingDocOperation = { type:action, key, id };
+  const reader = new FileReader();
+  reader.onload = function(){
+    const dataUrl = reader.result; // "data:application/pdf;base64,XXXXX"
+    const base64 = (dataUrl.split(',')[1]) || '';
+    callAppsScript({
+      action, fileName, category: cfg.docType.category, uploadedBy: state.name,
+      oldFileId: oldFileId || '', mimeType: 'application/pdf', data: base64
+    }, { type:action, key, id });
+  };
+  reader.onerror = function(){
+    setDocBusy(false);
+    toast('Could not read the selected file. Please try again.','danger');
+  };
+  reader.readAsDataURL(file);
+  input.value = ''; // reset so selecting the same file again still fires 'change'
+}
+
+function callAppsScript(payload, opContext){
+  pendingDocOperation = opContext;
   scheduleDocTimeout();
-  submitDocForm(action, { fileName, category: cfg.docType.category, uploadedBy: state.name, oldFileId });
+
+  const xhr = new XMLHttpRequest();
+  docXhr = xhr;
+  xhr.open('POST', APPS_SCRIPT_URL, true);
+  xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8'); // keeps this a CORS "simple request"
+
+  xhr.upload.onprogress = function(ev){
+    if(ev.lengthComputable){
+      const pct = Math.min(99, Math.round((ev.loaded/ev.total)*100));
+      updateDocProgress(pct);
+    }
+  };
+
+  xhr.onload = function(){
+    clearTimeout(window.__docOpTimeout);
+    docXhr = null;
+    let res = null;
+    try{ res = JSON.parse(xhr.responseText); }catch(e){ res = null; }
+    handleAppsScriptResult(res, opContext);
+  };
+
+  xhr.onerror = function(){
+    clearTimeout(window.__docOpTimeout);
+    docXhr = null;
+    pendingDocOperation = null;
+    setDocBusy(false);
+    toast('The request failed. Check your connection and try again.','danger');
+  };
+
+  xhr.send(JSON.stringify(payload));
 }
 
-function submitDocForm(action, params){
-  const form = document.getElementById('docUploadForm');
-  form.action = APPS_SCRIPT_URL;
-  document.getElementById('docFormAction').value = action;
-  document.getElementById('docFormFileName').value = params.fileName || '';
-  document.getElementById('docFormCategory').value = params.category || '';
-  document.getElementById('docFormUploadedBy').value = params.uploadedBy || '';
-  document.getElementById('docFormOldFileId').value = params.oldFileId || '';
-  document.getElementById('docFormFileId').value = params.fileId || '';
-  form.submit();
-}
-
-// Apps Script posts its JSON result back to us from the hidden iframe.
-window.addEventListener('message', function(ev){
-  if(!pendingDocOperation) return;
-  let res = ev.data;
-  if(typeof res === 'string'){
-    try{ res = JSON.parse(res); }catch(e){ return; }
-  }
-  if(!res || typeof res !== 'object' || !('success' in res)) return;
-
-  clearTimeout(window.__docOpTimeout);
-  stopDocTimer();
-  const op = pendingDocOperation;
+function handleAppsScriptResult(res, op){
   pendingDocOperation = null;
+
+  if(!res || typeof res !== 'object' || !('success' in res)){
+    setDocBusy(false);
+    toast('Unexpected response from the document service.','danger');
+    return;
+  }
 
   const cfg = MODULES[op.key];
   const record = state[op.key].find(r=>r.id===op.id);
@@ -1023,6 +1042,7 @@ window.addEventListener('message', function(ev){
         toast('Document deleted');
         logActivity('Deleted '+cfg.docType.label+' for '+(record[cfg.docType.numberField]||op.id));
         record[cfg.docType.field]=null;
+        setDocBusy(false);
         if(docCtx && docCtx.key===op.key && docCtx.id===op.id) renderDocCard();
       }).catch(err=>{
         setDocBusy(false);
@@ -1037,6 +1057,7 @@ window.addEventListener('message', function(ev){
 
   // upload / replace
   if(res.success){
+    updateDocProgress(100);
     const meta = {
       fileId: res.fileId, fileName: res.fileName, fileSize: res.fileSize,
       viewUrl: res.viewUrl, downloadUrl: res.downloadUrl,
@@ -1048,6 +1069,7 @@ window.addEventListener('message', function(ev){
       toast('Document uploaded successfully');
       logActivity((op.type==='replace'?'Replaced ':'Uploaded ')+cfg.docType.label+' for '+(record[cfg.docType.numberField]||op.id));
       record[cfg.docType.field]=meta;
+      setDocBusy(false);
       if(docCtx && docCtx.key===op.key && docCtx.id===op.id) renderDocCard();
     }).catch(err=>{
       setDocBusy(false);
@@ -1057,7 +1079,7 @@ window.addEventListener('message', function(ev){
     setDocBusy(false);
     toast('Upload failed: '+(res.error||'Google Drive returned an error'),'danger');
   }
-});
+}
 
 document.getElementById('docFileInput').addEventListener('change', handleFileSelectedFromInput);
 
