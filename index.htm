@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tatva Packagings | Admin Portal</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+:root{--brand:#0d3b73;--brand2:#1660a7;--bg:#f4f6f9;}
+body{background:var(--bg);font-family:'Segoe UI',Arial,sans-serif;}
+#loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--brand),var(--brand2));}
+.login-card{width:400px;border:none;border-radius:14px;box-shadow:0 15px 40px rgba(0,0,0,.25);}
+.brand-title{color:var(--brand);font-weight:700;letter-spacing:.5px;}
+#topbar{background:var(--brand);color:#fff;height:56px;display:flex;align-items:center;padding:0 16px;position:sticky;top:0;z-index:1030;}
+#topbar .company{font-weight:700;font-size:1.05rem;}
+#topbar .tag{font-size:.72rem;opacity:.8;}
+#sidebar{width:230px;min-height:calc(100vh - 56px);background:#fff;border-right:1px solid #e3e6ea;overflow-y:auto;}
+#sidebar .nav-link{color:#33414f;font-size:.88rem;padding:.55rem .9rem;border-left:3px solid transparent;cursor:pointer;}
+#sidebar .nav-link i{width:20px;text-align:center;margin-right:6px;}
+#sidebar .nav-link.active,#sidebar .nav-link:hover{background:#eef4fb;color:var(--brand);border-left-color:var(--brand);}
+#mainContent{flex:1;padding:18px 22px;min-height:calc(100vh - 56px);}
+.view{display:none;}
+.view.active{display:block;}
+.kpi-card{border:none;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.06);}
+.kpi-card .num{font-size:1.6rem;font-weight:700;color:var(--brand);}
+.kpi-card .label{font-size:.75rem;color:#6c757d;text-transform:uppercase;letter-spacing:.4px;}
+.module-card{background:#fff;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.06);padding:16px;}
+table.table thead{background:#f0f4f9;font-size:.78rem;text-transform:uppercase;letter-spacing:.3px;color:#4a5a6a;}
+table.table td,table.table th{font-size:.85rem;vertical-align:middle;}
+.badge-status{font-size:.72rem;}
+.notif-dot{width:8px;height:8px;border-radius:50%;background:#dc3545;position:absolute;top:6px;right:6px;}
+.toast-container{z-index:2000;}
+/* ---- Document Management additions ---- */
+.doc-card{border:1px solid #e3e6ea;border-radius:12px;padding:16px;background:#fafbfc;}
+.doc-card .doc-icon{font-size:1.9rem;color:#dc3545;}
+.doc-empty{border:2px dashed #cfd7e0;border-radius:12px;padding:28px 16px;text-align:center;color:#8a97a5;}
+.doc-empty:hover{border-color:var(--brand2);color:var(--brand2);}
+#docProgressWrap .progress{height:18px;}
+@media print{#topbar,#sidebar,.no-print{display:none !important;} #mainContent{padding:0;}}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen">
+  <div class="card login-card p-4">
+    <div class="text-center mb-3">
+      <div class="brand-title fs-4">TATVA PACKAGINGS</div>
+      <div class="text-muted small">Admin Portal — ERP / CRM</div>
+    </div>
+    <div id="loginAlert" class="alert alert-danger py-2 small d-none"></div>
+    <div id="loginPane">
+      <div class="mb-2"><label class="form-label small">Email</label><input id="loginEmail" type="email" class="form-control"></div>
+      <div class="mb-3"><label class="form-label small">Password</label><input id="loginPass" type="password" class="form-control"></div>
+      <button class="btn btn-primary w-100" onclick="doLogin()">Sign In</button>
+      <div class="text-center mt-3">
+        <a href="#" class="small" onclick="togglePane('signup');return false;">First time setup — Create Super Admin</a>
+      </div>
+    </div>
+    <div id="signupPane" class="d-none">
+      <div class="mb-2"><label class="form-label small">Your Name</label><input id="suName" class="form-control"></div>
+      <div class="mb-2"><label class="form-label small">Email</label><input id="suEmail" type="email" class="form-control"></div>
+      <div class="mb-3"><label class="form-label small">Password</label><input id="suPass" type="password" class="form-control"></div>
+      <button class="btn btn-success w-100" onclick="createSuperAdmin()">Create Super Admin</button>
+      <div class="text-center mt-3"><a href="#" class="small" onclick="togglePane('login');return false;">Back to Sign In</a></div>
+      <div class="small text-muted mt-2">Only works if no admin user exists yet.</div>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="appScreen" class="d-none">
+  <div id="topbar" class="d-flex justify-content-between">
+    <div class="d-flex align-items-center">
+      <div class="company">TATVA PACKAGINGS</div>
+      <div class="tag ms-2">Admin Portal</div>
+    </div>
+    <div class="d-flex align-items-center gap-3">
+      <div class="position-relative" style="cursor:pointer" onclick="navTo('notifications')">
+        <i class="bi bi-bell fs-5"></i><span id="notifDot" class="notif-dot d-none"></span>
+      </div>
+      <div class="small" id="whoami"></div>
+      <button class="btn btn-sm btn-light" onclick="doLogout()">Logout</button>
+    </div>
+  </div>
+  <div class="d-flex">
+    <nav id="sidebar" class="d-flex flex-column py-2">
+      <a class="nav-link active" data-view="dashboard" onclick="navTo('dashboard')"><i class="bi bi-speedometer2"></i>Dashboard</a>
+      <a class="nav-link" data-view="clients" onclick="navTo('clients')"><i class="bi bi-people"></i>Clients</a>
+      <a class="nav-link" data-view="requirements" onclick="navTo('requirements')"><i class="bi bi-clipboard-data"></i>Requirements</a>
+      <a class="nav-link" data-view="manufacturers" onclick="navTo('manufacturers')"><i class="bi bi-building"></i>Manufacturers</a>
+      <a class="nav-link" data-view="quotations" onclick="navTo('quotations')"><i class="bi bi-file-earmark-text"></i>Quotations</a>
+      <a class="nav-link" data-view="purchaseOrders" onclick="navTo('purchaseOrders')"><i class="bi bi-receipt"></i>Purchase Orders</a>
+      <a class="nav-link" data-view="production" onclick="navTo('production')"><i class="bi bi-gear"></i>Production</a>
+      <a class="nav-link" data-view="dispatch" onclick="navTo('dispatch')"><i class="bi bi-truck"></i>Dispatch</a>
+      <a class="nav-link" data-view="payments" onclick="navTo('payments')"><i class="bi bi-cash-coin"></i>Customer Payments</a>
+      <a class="nav-link" data-view="manCommission" onclick="navTo('manCommission')"><i class="bi bi-percent"></i>Manufacturer Commission</a>
+      <a class="nav-link" data-view="salesCommission" onclick="navTo('salesCommission')"><i class="bi bi-wallet2"></i>Sales Commission</a>
+      <a class="nav-link" data-view="accounts" onclick="navTo('accounts')"><i class="bi bi-journal-text"></i>Accounts</a>
+      <a class="nav-link" data-view="reports" onclick="navTo('reports')"><i class="bi bi-bar-chart"></i>Reports</a>
+      <a class="nav-link" data-view="users" onclick="navTo('users')"><i class="bi bi-person-badge"></i>Users</a>
+      <a class="nav-link" data-view="notifications" onclick="navTo('notifications')"><i class="bi bi-bell"></i>Notifications</a>
+      <a class="nav-link" data-view="activityLogs" onclick="navTo('activityLogs')"><i class="bi bi-clock-history"></i>Activity Logs</a>
+      <a class="nav-link" data-view="settings" onclick="navTo('settings')"><i class="bi bi-sliders"></i>Settings</a>
+    </nav>
+    <main id="mainContent">
+
+      <!-- DASHBOARD -->
+      <div class="view active" id="view-dashboard">
+        <h5 class="mb-3">Dashboard</h5>
+        <div class="row g-3" id="kpiRow"></div>
+        <div class="row g-3 mt-1">
+          <div class="col-md-6"><div class="module-card"><h6>Monthly PO Value</h6><canvas id="chartMonthly" height="160"></canvas></div></div>
+          <div class="col-md-6"><div class="module-card"><h6>Commission Received vs Pending</h6><canvas id="chartCommission" height="160"></canvas></div></div>
+        </div>
+        <div class="module-card mt-3">
+          <h6>Recent Activity</h6>
+          <div id="recentActivity" class="small"></div>
+        </div>
+      </div>
+
+      <!-- GENERIC MODULE VIEWS -->
+      <div class="view" id="view-clients"></div>
+      <div class="view" id="view-requirements"></div>
+      <div class="view" id="view-manufacturers"></div>
+      <div class="view" id="view-quotations"></div>
+      <div class="view" id="view-purchaseOrders"></div>
+      <div class="view" id="view-production"></div>
+      <div class="view" id="view-dispatch"></div>
+      <div class="view" id="view-payments"></div>
+      <div class="view" id="view-manCommission"></div>
+      <div class="view" id="view-salesCommission"></div>
+      <div class="view" id="view-users"></div>
+
+      <!-- ACCOUNTS -->
+      <div class="view" id="view-accounts">
+        <h5 class="mb-3">Accounts (Ledgers)</h5>
+        <ul class="nav nav-tabs" id="acctTabs">
+          <li class="nav-item"><a class="nav-link active" onclick="renderLedger('client')">Client Ledger</a></li>
+          <li class="nav-item"><a class="nav-link" onclick="renderLedger('manufacturer')">Manufacturer Ledger</a></li>
+          <li class="nav-item"><a class="nav-link" onclick="renderLedger('sales')">Sales Ledger</a></li>
+        </ul>
+        <div class="module-card mt-2">
+          <div class="table-responsive"><table class="table table-hover" id="ledgerTable">
+            <thead><tr id="ledgerHead"></tr></thead><tbody id="ledgerBody"></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <!-- REPORTS -->
+      <div class="view" id="view-reports">
+        <h5 class="mb-3">Reports</h5>
+        <div class="mb-3 d-flex gap-2 flex-wrap">
+          <select id="reportPicker" class="form-select w-auto" onchange="renderReport()">
+            <option value="clients">Client Report</option>
+            <option value="requirements">Requirement Report</option>
+            <option value="quotations">Quotation Report</option>
+            <option value="purchaseOrders">PO Report</option>
+            <option value="production">Production Report</option>
+            <option value="dispatch">Dispatch Report</option>
+            <option value="manCommission">Manufacturer Commission Report</option>
+            <option value="salesCommission">Sales Commission Report</option>
+            <option value="payments">Outstanding Payment Report</option>
+          </select>
+          <button class="btn btn-outline-secondary btn-sm" onclick="exportReportCSV()"><i class="bi bi-download"></i> Export CSV</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="printReport()"><i class="bi bi-printer"></i> Print</button>
+        </div>
+        <div class="module-card"><div class="table-responsive"><table class="table table-hover" id="reportTable">
+          <thead><tr id="reportHead"></tr></thead><tbody id="reportBody"></tbody>
+        </table></div></div>
+      </div>
+
+      <!-- NOTIFICATIONS -->
+      <div class="view" id="view-notifications">
+        <h5 class="mb-3">Notifications</h5>
+        <div class="module-card"><div id="notifList" class="list-group list-group-flush"></div></div>
+      </div>
+
+      <!-- ACTIVITY LOGS -->
+      <div class="view" id="view-activityLogs">
+        <h5 class="mb-3">Activity Logs</h5>
+        <div class="module-card"><div class="table-responsive"><table class="table table-sm">
+          <thead><tr><th>Time</th><th>User</th><th>Action</th></tr></thead>
+          <tbody id="activityLogsBody"></tbody>
+        </table></div></div>
+      </div>
+
+      <!-- SETTINGS -->
+      <div class="view" id="view-settings">
+        <h5 class="mb-3">Settings</h5>
+        <div class="module-card" style="max-width:420px">
+          <label class="form-label small">Default Sales Commission %</label>
+          <input type="number" id="setSalesPct" class="form-control mb-2">
+          <button class="btn btn-primary btn-sm" onclick="saveSettings()">Save</button>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- SHARED MODAL -->
+<div class="modal fade" id="genericModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title" id="genericModalTitle">Form</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body"><form id="genericForm" class="row g-2"></form></div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" onclick="submitGenericForm()">Save</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- DOCUMENT MANAGEMENT MODAL -->
+<div class="modal fade" id="docModal" tabindex="-1">
+  <div class="modal-dialog modal-md">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="docModalTitle"><i class="bi bi-folder2-open me-1"></i> Document</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="docModalBody"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastHost"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+<script>
+/* ================= FIREBASE ================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyBK3-JNmbgf2mtr6F0-9mq0kPTlPvJfJII",
+  authDomain: "sales-crm-87202.firebaseapp.com",
+  projectId: "sales-crm-87202",
+  storageBucket: "sales-crm-87202.firebasestorage.app",
+  messagingSenderId: "766645090323",
+  appId: "1:766645090323:web:3196990dcbb5032e7827e6",
+  measurementId: "G-JD47Y8EC8Q"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+const secondaryApp = firebase.initializeApp(firebaseConfig, "Secondary");
+const secondaryAuth = secondaryApp.auth();
+
+/* ================= DOCUMENT MANAGEMENT CONFIG =================
+   Paste the "Web app URL" you get after deploying the Google Apps
+   Script (see SETUP_INSTRUCTIONS.md) between the quotes below.
+   Everything else works automatically once this is set. */
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzd9Xtz4HHVJdDiAeaCgKIcpDxaezM_nMH7evofPdTupLEu2ff1ontL4dax8bfeerOpIw/exec";
+const MAX_DOC_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
+
+/* ================= STATE ================= */
+const state = {
+  uid:null, name:'', email:'', role:null,
+  clients:[], requirements:[], manufacturers:[], quotations:[], purchaseOrders:[],
+  production:[], dispatch:[], payments:[], manCommission:[], salesCommission:[],
+  users:[], notifications:[], activityLogs:[], settings:{salesCommissionPercent:10}
+};
+let currentView='dashboard';
+
+function toast(msg, type='success'){
+  const id='t'+Date.now();
+  document.getElementById('toastHost').insertAdjacentHTML('beforeend',
+   `<div class="toast align-items-center text-bg-${type} border-0" id="${id}" role="alert"><div class="d-flex">
+    <div class="toast-body">${msg}</div><button class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div></div>`);
+  new bootstrap.Toast(document.getElementById(id),{delay:3500}).show();
+}
+function togglePane(p){
+  document.getElementById('loginPane').classList.toggle('d-none', p!=='login');
+  document.getElementById('signupPane').classList.toggle('d-none', p!=='signup');
+}
+function fmtDate(d){ if(!d) return ''; return d; }
+function esc(s){ return (s===undefined||s===null)?'':String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ================= AUTH ================= */
+function doLogin(){
+  const email=document.getElementById('loginEmail').value.trim();
+  const pass=document.getElementById('loginPass').value;
+  const alertBox=document.getElementById('loginAlert');
+  alertBox.classList.add('d-none');
+  auth.signInWithEmailAndPassword(email,pass).then(async cred=>{
+    const doc = await db.collection('users').doc(cred.user.uid).get();
+    if(!doc.exists || !['admin','super_admin'].includes(doc.data().role)){
+      await auth.signOut();
+      alertBox.textContent='Access denied. This login is not an Admin account.';
+      alertBox.classList.remove('d-none');
+      return;
+    }
+    state.uid=cred.user.uid; state.name=doc.data().name; state.email=email; state.role=doc.data().role;
+    enterApp();
+  }).catch(err=>{
+    alertBox.textContent=err.message; alertBox.classList.remove('d-none');
+  });
+}
+function doLogout(){ auth.signOut().then(()=>location.reload()); }
+
+async function createSuperAdmin(){
+  const name=document.getElementById('suName').value.trim();
+  const email=document.getElementById('suEmail').value.trim();
+  const pass=document.getElementById('suPass').value;
+  if(!name||!email||!pass){ toast('Fill all fields','danger'); return; }
+  const existing = await db.collection('users').limit(1).get();
+  if(!existing.empty){ toast('Setup already completed. Ask an existing admin to create your account.','danger'); return; }
+  try{
+    const cred = await auth.createUserWithEmailAndPassword(email,pass);
+    await db.collection('users').doc(cred.user.uid).set({
+      name, email, role:'super_admin', mobile:'', status:'Active', createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    toast('Super Admin created. You are now logged in.');
+    state.uid=cred.user.uid; state.name=name; state.email=email; state.role='super_admin';
+    enterApp();
+  }catch(err){ toast(err.message,'danger'); }
+}
+
+auth.onAuthStateChanged(async user=>{
+  if(user){
+    const doc = await db.collection('users').doc(user.uid).get();
+    if(doc.exists && ['admin','super_admin'].includes(doc.data().role)){
+      state.uid=user.uid; state.name=doc.data().name; state.email=user.email; state.role=doc.data().role;
+      enterApp();
+    }
+  }
+});
+
+function enterApp(){
+  document.getElementById('loginScreen').classList.add('d-none');
+  document.getElementById('appScreen').classList.remove('d-none');
+  document.getElementById('whoami').textContent = state.name + ' (' + state.role + ')';
+  initListeners();
+  navTo('dashboard');
+}
+
+/* ================= NAV ================= */
+function navTo(view){
+  currentView=view;
+  document.querySelectorAll('#sidebar .nav-link').forEach(a=>a.classList.toggle('active', a.dataset.view===view));
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.getElementById('view-'+view).classList.add('active');
+  if(MODULES[view]) renderModuleView(MODULES[view]);
+  if(view==='dashboard') renderDashboard();
+  if(view==='accounts') renderLedger('client');
+  if(view==='reports') renderReport();
+  if(view==='notifications') renderNotifList();
+  if(view==='activityLogs') renderActivityLogs();
+  if(view==='settings'){ document.getElementById('setSalesPct').value = state.settings.salesCommissionPercent; }
+}
+
+/* ================= NUMBER GENERATOR ================= */
+function getNextNumber(prefix){
+  const ref = db.collection('counters').doc(prefix);
+  return db.runTransaction(async t=>{
+    const doc = await t.get(ref);
+    let seq = 1;
+    if(doc.exists) seq = (doc.data().seq||0)+1;
+    t.set(ref,{seq},{merge:true});
+    const yr = new Date().getFullYear();
+    return prefix + '-' + yr + '-' + String(seq).padStart(4,'0');
+  });
+}
+function logActivity(action){
+  db.collection('activityLogs').add({ user: state.name, action, ts: firebase.firestore.FieldValue.serverTimestamp() });
+}
+function pushNotification(text){
+  db.collection('notifications').add({ text, read:false, ts: firebase.firestore.FieldValue.serverTimestamp() });
+}
+
+/* ================= MODULE ENGINE ================= */
+const MODULES = {
+  clients:{
+    title:'Clients', collection:'clients', numberField:'clientCode', prefix:'CL',
+    searchFields:['clientCode','companyName','contactPerson','mobile','city'],
+    columns:[
+      {k:'clientCode',l:'Code'},{k:'companyName',l:'Company'},{k:'contactPerson',l:'Contact'},
+      {k:'mobile',l:'Mobile'},{k:'city',l:'City'},{k:'assignedSalesName',l:'Sales Person'}
+    ],
+    fields:[
+      {n:'companyName',l:'Company Name',t:'text',req:true},
+      {n:'gst',l:'GST Number',t:'text'},
+      {n:'pan',l:'PAN Number',t:'text'},
+      {n:'contactPerson',l:'Contact Person',t:'text',req:true},
+      {n:'mobile',l:'Mobile Number',t:'text',req:true},
+      {n:'whatsapp',l:'WhatsApp Number',t:'text'},
+      {n:'email',l:'Email',t:'email'},
+      {n:'address',l:'Address',t:'textarea'},
+      {n:'city',l:'City',t:'text'},
+      {n:'state',l:'State',t:'text'},
+      {n:'pin',l:'PIN Code',t:'text'},
+      {n:'assignedSalesUid',l:'Assigned Sales Person',t:'select',source:()=>state.users.filter(u=>u.role==='sales').map(u=>({v:u.id,t:u.name}))},
+      {n:'remarks',l:'Remarks',t:'textarea'}
+    ],
+    beforeSave:(data)=>{ const u=state.users.find(x=>x.id===data.assignedSalesUid); data.assignedSalesName = u? u.name: ''; },
+    afterSave:(isNew)=>{ if(isNew) pushNotification('New client added: '+state.name); }
+  },
+  requirements:{
+    title:'Requirements', collection:'requirements', numberField:'requirementNo', prefix:'REQ',
+    searchFields:['requirementNo','clientCode','productType'],
+    columns:[
+      {k:'requirementNo',l:'No'},{k:'clientCode',l:'Client'},{k:'productType',l:'Product'},
+      {k:'quantity',l:'Qty'},{k:'expectedPrice',l:'Exp. Price'},{k:'status',l:'Status',badge:true}
+    ],
+    fields:[
+      {n:'clientCode',l:'Client',t:'select',req:true,source:()=>state.clients.map(c=>({v:c.clientCode,t:c.clientCode+' - '+c.companyName}))},
+      {n:'requirementDate',l:'Requirement Date',t:'date'},
+      {n:'productType',l:'Product Type',t:'select',options:['Corrugated Box','Mono Carton','Duplex Box','Printed Box','Export Box']},
+      {n:'boxLength',l:'Length',t:'number'},{n:'width',l:'Width',t:'number'},{n:'height',l:'Height',t:'number'},
+      {n:'ply',l:'Ply',t:'text'},{n:'paperGSM',l:'Paper GSM',t:'text'},{n:'bf',l:'BF',t:'text'},
+      {n:'printing',l:'Printing',t:'text'},
+      {n:'quantity',l:'Quantity',t:'number'},{n:'expectedPrice',l:'Expected Price',t:'number'},
+      {n:'deliveryLocation',l:'Delivery Location',t:'text'},{n:'deliveryDate',l:'Delivery Date',t:'date'},
+      {n:'remarks',l:'Remarks',t:'textarea'},
+      {n:'status',l:'Status',t:'select',options:['Pending','Approved','Rejected','Revision']}
+    ],
+    afterSave:(isNew)=>{ if(isNew) pushNotification('New requirement submitted'); }
+  },
+  manufacturers:{
+    title:'Manufacturers', collection:'manufacturers', numberField:'manufacturerCode', prefix:'MFG',
+    searchFields:['manufacturerCode','manufacturerName','contactPerson'],
+    columns:[
+      {k:'manufacturerCode',l:'Code'},{k:'manufacturerName',l:'Name'},{k:'contactPerson',l:'Contact'},
+      {k:'phone',l:'Phone'},{k:'commissionType',l:'Comm. Type'},{k:'commissionValue',l:'Comm. Value'}
+    ],
+    fields:[
+      {n:'manufacturerName',l:'Manufacturer Name',t:'text',req:true},
+      {n:'contactPerson',l:'Contact Person',t:'text'},
+      {n:'factoryAddress',l:'Factory Address',t:'textarea'},
+      {n:'gst',l:'GST',t:'text'},{n:'pan',l:'PAN',t:'text'},
+      {n:'email',l:'Email',t:'email'},{n:'phone',l:'Phone',t:'text'},{n:'whatsapp',l:'WhatsApp',t:'text'},
+      {n:'productsManufactured',l:'Products Manufactured',t:'text'},
+      {n:'commissionType',l:'Commission Type',t:'select',options:['Per Box','Percentage','Fixed']},
+      {n:'commissionValue',l:'Commission Value',t:'number'},
+      {n:'paymentTerms',l:'Payment Terms',t:'text'},
+      {n:'rating',l:'Rating (1-5)',t:'number'},
+      {n:'remarks',l:'Remarks',t:'textarea'}
+    ]
+  },
+  quotations:{
+    title:'Quotations', collection:'quotations', numberField:'quoteNo', prefix:'QT',
+    searchFields:['quoteNo','clientCode','requirementNo'],
+    columns:[
+      {k:'quoteNo',l:'Quote No'},{k:'clientCode',l:'Client'},{k:'manufacturerCode',l:'Manufacturer'},
+      {k:'totalAmount',l:'Total'},{k:'validity',l:'Validity'},{k:'status',l:'Status',badge:true}
+    ],
+    fields:[
+      {n:'clientCode',l:'Client',t:'select',req:true,source:()=>state.clients.map(c=>({v:c.clientCode,t:c.clientCode+' - '+c.companyName}))},
+      {n:'requirementNo',l:'Requirement No',t:'select',source:()=>state.requirements.map(r=>({v:r.requirementNo,t:r.requirementNo}))},
+      {n:'manufacturerCode',l:'Manufacturer',t:'select',source:()=>state.manufacturers.map(m=>({v:m.manufacturerCode,t:m.manufacturerCode+' - '+m.manufacturerName}))},
+      {n:'quoteAmount',l:'Quote Amount',t:'number'},{n:'gst',l:'GST',t:'number'},
+      {n:'freight',l:'Freight',t:'number'},{n:'packing',l:'Packing',t:'number'},{n:'insurance',l:'Insurance',t:'number'},
+      {n:'validity',l:'Validity Date',t:'date'},
+      {n:'terms',l:'Terms & Conditions',t:'textarea'},
+      {n:'status',l:'Status',t:'select',options:['Draft','Sent','Approved','Rejected','Revised']}
+    ],
+    beforeSave:(data)=>{
+      const amt=(+data.quoteAmount||0)+(+data.gst||0)+(+data.freight||0)+(+data.packing||0)+(+data.insurance||0);
+      data.totalAmount = amt;
+      const cl = state.clients.find(c=>c.clientCode===data.clientCode);
+      data.salesPersonUid = cl? cl.assignedSalesUid : '';
+    },
+    afterSave:(isNew)=>{ if(isNew) pushNotification('Quotation created and sent to sales'); },
+    /* --- Document Management: Quotation PDF card --- */
+    docType:{ field:'quotation', category:'Quotations', prefix:'QT', numberField:'quoteNo', label:'Quotation Document' }
+  },
+  purchaseOrders:{
+    title:'Purchase Orders', collection:'purchaseOrders', numberField:'poEntryNo', prefix:'PO',
+    searchFields:['poEntryNo','poNumber','clientCode'],
+    columns:[
+      {k:'poEntryNo',l:'Entry No'},{k:'poNumber',l:'PO Number'},{k:'clientCode',l:'Client'},
+      {k:'poAmount',l:'Amount'},{k:'expectedDeliveryDate',l:'Expected Delivery'},{k:'status',l:'Status',badge:true}
+    ],
+    fields:[
+      {n:'poNumber',l:'PO Number',t:'text',req:true},
+      {n:'poDate',l:'PO Date',t:'date'},
+      {n:'poAmount',l:'PO Amount',t:'number'},
+      {n:'clientCode',l:'Client',t:'select',source:()=>state.clients.map(c=>({v:c.clientCode,t:c.clientCode+' - '+c.companyName}))},
+      {n:'quoteNo',l:'Quote Number',t:'select',source:()=>state.quotations.map(q=>({v:q.quoteNo,t:q.quoteNo}))},
+      {n:'expectedDeliveryDate',l:'Expected Delivery Date',t:'date'},
+      {n:'remarks',l:'Remarks',t:'textarea'},
+      {n:'status',l:'Status',t:'select',options:['Pending','Approved','Rejected','Revision']}
+    ],
+    afterSave:(isNew)=>{ if(isNew) pushNotification('PO uploaded — awaiting approval'); },
+    /* --- Document Management: Purchase Order PDF card --- */
+    docType:{ field:'purchaseOrder', category:'Purchase Orders', prefix:'PO', numberField:'poNumber', label:'Purchase Order Document' }
+  },
+  production:{
+    title:'Production Tracker', collection:'production', numberField:'productionId', prefix:'PRD',
+    searchFields:['productionId','poNumber'],
+    columns:[
+      {k:'productionId',l:'ID'},{k:'poNumber',l:'PO Number'},{k:'stage',l:'Stage'},
+      {k:'progressPercent',l:'Progress %'},{k:'expectedCompletionDate',l:'Exp. Completion'}
+    ],
+    fields:[
+      {n:'poNumber',l:'PO Number',t:'select',req:true,source:()=>state.purchaseOrders.map(p=>({v:p.poNumber,t:p.poNumber}))},
+      {n:'stage',l:'Stage',t:'select',options:['Raw Material','Board Making','Printing','Die Cutting','Slotting','Pasting','Packing','QC','Ready','Completed']},
+      {n:'progressPercent',l:'Progress %',t:'number'},
+      {n:'productionStartDate',l:'Production Start Date',t:'date'},
+      {n:'expectedCompletionDate',l:'Expected Completion Date',t:'date'},
+      {n:'completionDate',l:'Completion Date',t:'date'},
+      {n:'remarks',l:'Remarks',t:'textarea'}
+    ]
+  },
+  dispatch:{
+    title:'Dispatch', collection:'dispatch', numberField:'dispatchNumber', prefix:'DSP',
+    searchFields:['dispatchNumber','poNumber','invoiceNumber'],
+    columns:[
+      {k:'dispatchNumber',l:'Dispatch No'},{k:'poNumber',l:'PO Number'},{k:'invoiceNumber',l:'Invoice'},
+      {k:'vehicleNumber',l:'Vehicle'},{k:'dispatchDate',l:'Dispatch Date'},{k:'deliveryStatus',l:'Status',badge:true}
+    ],
+    fields:[
+      {n:'poNumber',l:'PO Number',t:'select',req:true,source:()=>state.purchaseOrders.map(p=>({v:p.poNumber,t:p.poNumber}))},
+      {n:'invoiceNumber',l:'Invoice Number',t:'text'},
+      {n:'vehicleNumber',l:'Vehicle Number',t:'text'},
+      {n:'transportName',l:'Transport Name',t:'text'},
+      {n:'lrNumber',l:'LR Number',t:'text'},
+      {n:'dispatchDate',l:'Dispatch Date',t:'date'},
+      {n:'deliveryDate',l:'Delivery Date',t:'date'},
+      {n:'deliveryStatus',l:'Delivery Status',t:'select',options:['Pending','In Transit','Delivered','Returned']},
+      {n:'remarks',l:'Remarks',t:'textarea'}
+    ],
+    afterSave:(isNew)=>{ if(isNew) pushNotification('Dispatch recorded'); }
+  },
+  payments:{
+    title:'Customer Payments', collection:'payments', numberField:'paymentEntryNo', prefix:'PAY',
+    searchFields:['paymentEntryNo','invoiceNumber'],
+    columns:[
+      {k:'paymentEntryNo',l:'Entry No'},{k:'invoiceNumber',l:'Invoice'},{k:'invoiceAmount',l:'Invoice Amt'},
+      {k:'balanceAmount',l:'Balance'},{k:'status',l:'Status',badge:true}
+    ],
+    fields:[
+      {n:'invoiceNumber',l:'Invoice Number',t:'text',req:true},
+      {n:'invoiceDate',l:'Invoice Date',t:'date'},
+      {n:'invoiceAmount',l:'Invoice Amount',t:'number'},
+      {n:'advanceReceived',l:'Advance Received',t:'number'},
+      {n:'finalPaymentReceived',l:'Final Payment Received',t:'number'},
+      {n:'paymentDate',l:'Payment Date',t:'date'},
+      {n:'paymentMode',l:'Payment Mode',t:'select',options:['Cash','Cheque','NEFT','RTGS','UPI']},
+      {n:'bankName',l:'Bank Name',t:'text'},
+      {n:'utr',l:'UTR / Cheque Number',t:'text'},
+      {n:'status',l:'Status',t:'select',options:['Pending','Partial','Received']}
+    ],
+    beforeSave:(data)=>{
+      const bal=(+data.invoiceAmount||0)-((+data.advanceReceived||0)+(+data.finalPaymentReceived||0));
+      data.balanceAmount = bal;
+    }
+  },
+  manCommission:{
+    title:'Manufacturer Commission', collection:'manCommission', numberField:'commissionEntryNo', prefix:'MC',
+    searchFields:['commissionEntryNo','manufacturerCode','poNumber'],
+    columns:[
+      {k:'commissionEntryNo',l:'Entry No'},{k:'manufacturerCode',l:'Manufacturer'},{k:'poNumber',l:'PO'},
+      {k:'commissionAmount',l:'Comm. Amt'},{k:'receivedAmount',l:'Received'},{k:'balance',l:'Balance'},{k:'status',l:'Status',badge:true}
+    ],
+    fields:[
+      {n:'manufacturerCode',l:'Manufacturer',t:'select',req:true,source:()=>state.manufacturers.map(m=>({v:m.manufacturerCode,t:m.manufacturerCode+' - '+m.manufacturerName}))},
+      {n:'poNumber',l:'PO Number',t:'select',req:true,source:()=>state.purchaseOrders.map(p=>({v:p.poNumber,t:p.poNumber}))},
+      {n:'clientCode',l:'Client',t:'select',source:()=>state.clients.map(c=>({v:c.clientCode,t:c.clientCode+' - '+c.companyName}))},
+      {n:'totalBoxes',l:'Total Boxes',t:'number'},
+      {n:'commissionRate',l:'Commission Rate',t:'number'},
+      {n:'commissionAmount',l:'Commission Amount',t:'number'},
+      {n:'receivedAmount',l:'Received Amount',t:'number'},
+      {n:'receivedDate',l:'Received Date',t:'date'},
+      {n:'paymentMode',l:'Payment Mode',t:'select',options:['Cash','Cheque','NEFT','RTGS','UPI']},
+      {n:'bankName',l:'Bank Name',t:'text'},{n:'utr',l:'UTR Number',t:'text'},
+      {n:'status',l:'Status',t:'select',options:['Pending','Partial','Received']},
+      {n:'remarks',l:'Remarks',t:'textarea'}
+    ],
+    beforeSave:(data)=>{ data.balance = (+data.commissionAmount||0)-(+data.receivedAmount||0); },
+    afterSave:(isNew,data)=>{
+      pushNotification('Manufacturer commission updated: '+data.manufacturerCode);
+      if((+data.receivedAmount||0) > 0){
+        autoCreateSalesCommission(data);
+      }
+    }
+  },
+  salesCommission:{
+    title:'Sales Commission', collection:'salesCommission', numberField:'commissionVoucherNo', prefix:'SC',
+    searchFields:['commissionVoucherNo','poNumber','salesPersonName'],
+    columns:[
+      {k:'commissionVoucherNo',l:'Voucher No'},{k:'salesPersonName',l:'Sales Person'},{k:'poNumber',l:'PO'},
+      {k:'commissionAmount',l:'Amount'},{k:'paidAmount',l:'Paid'},{k:'balance',l:'Balance'},{k:'status',l:'Status',badge:true}
+    ],
+    fields:[
+      {n:'salesPersonUid',l:'Sales Person',t:'select',req:true,source:()=>state.users.filter(u=>u.role==='sales').map(u=>({v:u.id,t:u.name}))},
+      {n:'poNumber',l:'PO Number',t:'select',source:()=>state.purchaseOrders.map(p=>({v:p.poNumber,t:p.poNumber}))},
+      {n:'totalBoxes',l:'Total Boxes',t:'number'},
+      {n:'commissionPercent',l:'Commission %',t:'number'},
+      {n:'commissionAmount',l:'Commission Amount',t:'number'},
+      {n:'paidAmount',l:'Paid Amount',t:'number'},
+      {n:'paymentDate',l:'Payment Date',t:'date'},
+      {n:'paymentMode',l:'Payment Mode',t:'select',options:['Cash','Cheque','NEFT','RTGS','UPI']},
+      {n:'bankName',l:'Bank Name',t:'text'},{n:'utr',l:'UTR Number',t:'text'},
+      {n:'status',l:'Status',t:'select',options:['Pending','Partial','Paid']}
+    ],
+    beforeSave:(data)=>{
+      data.balance=(+data.commissionAmount||0)-(+data.paidAmount||0);
+      const u=state.users.find(x=>x.id===data.salesPersonUid); data.salesPersonName=u?u.name:'';
+    },
+    afterSave:(isNew,data)=>{ pushNotification('Sales commission updated for '+data.salesPersonName); }
+  },
+  users:{
+    title:'Users', collection:'users', numberField:null,
+    searchFields:['name','email','role'],
+    columns:[{k:'name',l:'Name'},{k:'email',l:'Email'},{k:'role',l:'Role'},{k:'status',l:'Status',badge:true}],
+    fields:[
+      {n:'name',l:'Name',t:'text',req:true},
+      {n:'email',l:'Email',t:'email',req:true,onlyNew:true},
+      {n:'password',l:'Password',t:'password',onlyNew:true,req:true},
+      {n:'mobile',l:'Mobile',t:'text'},
+      {n:'role',l:'Role',t:'select',options:['admin','sales']},
+      {n:'status',l:'Status',t:'select',options:['Active','Inactive']}
+    ],
+    customSave: async (data,id)=>{
+      if(id){
+        await db.collection('users').doc(id).update({name:data.name,mobile:data.mobile,role:data.role,status:data.status});
+        toast('User updated'); logActivity('Updated user '+data.name);
+      }else{
+        try{
+          const cred = await secondaryAuth.createUserWithEmailAndPassword(data.email, data.password);
+          await db.collection('users').doc(cred.user.uid).set({
+            name:data.name, email:data.email, mobile:data.mobile, role:data.role, status:data.status||'Active',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          await secondaryAuth.signOut();
+          toast('User created'); logActivity('Created user '+data.name);
+        }catch(e){ toast(e.message,'danger'); }
+      }
+    }
+  }
+};
+
+function badgeClass(v){
+  const m={Approved:'success',Received:'success',Paid:'success',Completed:'success',Delivered:'success',
+    Pending:'warning',Partial:'info',Draft:'secondary','In Transit':'info',Revision:'warning',
+    Rejected:'danger',Returned:'danger',Active:'success',Inactive:'secondary',Sent:'primary'};
+  return m[v]||'secondary';
+}
+
+function renderModuleView(cfg){
+  const key = Object.keys(MODULES).find(k=>MODULES[k]===cfg);
+  const el = document.getElementById('view-'+key);
+  el.innerHTML = `
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="m-0">${cfg.title}</h5>
+      <div class="d-flex gap-2">
+        <input type="text" class="form-control form-control-sm" style="width:220px" placeholder="Search..." oninput="renderTable('${key}',this.value)">
+        <button class="btn btn-sm btn-outline-secondary" onclick="exportCSV('${key}')"><i class="bi bi-download"></i> CSV</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="printModule('${key}')"><i class="bi bi-printer"></i> Print</button>
+        <button class="btn btn-sm btn-primary" onclick="openForm('${key}')"><i class="bi bi-plus-lg"></i> Add</button>
+      </div>
+    </div>
+    <div class="module-card"><div class="table-responsive"><table class="table table-hover">
+      <thead><tr>${cfg.columns.map(c=>'<th>'+c.l+'</th>').join('')}<th>Actions</th></tr></thead>
+      <tbody id="tbody-${key}"></tbody>
+    </table></div></div>`;
+  renderTable(key,'');
+}
+
+function renderTable(key, q){
+  const cfg = MODULES[key];
+  q=(q||'').toLowerCase();
+  let rows = state[key]||[];
+  if(q) rows = rows.filter(r=> cfg.searchFields.some(f=> (r[f]||'').toString().toLowerCase().includes(q)));
+  const tbody=document.getElementById('tbody-'+key);
+  if(!tbody) return;
+  tbody.innerHTML = rows.map(r=>{
+    const tds = cfg.columns.map(c=>{
+      let v = r[c.k];
+      if(c.badge && v) return `<td><span class="badge bg-${badgeClass(v)} badge-status">${esc(v)}</span></td>`;
+      return `<td>${esc(v)}</td>`;
+    }).join('');
+    const docBtn = cfg.docType
+      ? `<button class="btn btn-sm ${r[cfg.docType.field]&&r[cfg.docType.field].fileId?'btn-outline-success':'btn-outline-secondary'}" onclick="openDocManager('${key}','${r.id}')" title="Documents"><i class="bi bi-folder2-open"></i></button>`
+      : '';
+    return `<tr>${tds}<td>
+      ${docBtn}
+      <button class="btn btn-sm btn-outline-primary" onclick="openForm('${key}','${r.id}')"><i class="bi bi-pencil"></i></button>
+      <button class="btn btn-sm btn-outline-danger" onclick="deleteDoc('${key}','${r.id}')"><i class="bi bi-trash"></i></button>
+    </td></tr>`;
+  }).join('') || `<tr><td colspan="${cfg.columns.length+1}" class="text-center text-muted">No records</td></tr>`;
+}
+
+let editingKey=null, editingId=null;
+function openForm(key, id){
+  editingKey=key; editingId=id||null;
+  const cfg = MODULES[key];
+  const record = id ? (state[key].find(r=>r.id===id)||{}) : {};
+  document.getElementById('genericModalTitle').textContent = (id?'Edit ':'Add ')+cfg.title;
+  const form = document.getElementById('genericForm');
+  form.innerHTML = cfg.fields.filter(f=> !(f.onlyNew && id)).map(f=>{
+    let input='';
+    const val = record[f.n]!==undefined? record[f.n] : '';
+    if(f.t==='select'){
+      const opts = f.source? f.source() : (f.options||[]).map(o=>({v:o,t:o}));
+      input = `<select class="form-select" name="${f.n}" ${f.req?'required':''}><option value="">-- Select --</option>${opts.map(o=>`<option value="${esc(o.v)}" ${o.v==val?'selected':''}>${esc(o.t)}</option>`).join('')}</select>`;
+    } else if(f.t==='textarea'){
+      input = `<textarea class="form-control" name="${f.n}" rows="2">${esc(val)}</textarea>`;
+    } else {
+      input = `<input type="${f.t}" class="form-control" name="${f.n}" value="${esc(val)}" ${f.req?'required':''}>`;
+    }
+    return `<div class="col-md-6"><label class="form-label small">${f.l}</label>${input}</div>`;
+  }).join('');
+  new bootstrap.Modal(document.getElementById('genericModal')).show();
+}
+
+async function submitGenericForm(){
+  const key=editingKey, cfg=MODULES[key];
+  const form=document.getElementById('genericForm');
+  if(!form.checkValidity()){ form.reportValidity(); return; }
+  const data={};
+  cfg.fields.filter(f=>!(f.onlyNew && editingId)).forEach(f=>{
+    const el=form.elements[f.n]; if(el) data[f.n]=el.value;
+  });
+  if(cfg.beforeSave) cfg.beforeSave(data);
+  if(cfg.customSave){
+    await cfg.customSave(data, editingId);
+    bootstrap.Modal.getInstance(document.getElementById('genericModal')).hide();
+    return;
+  }
+  try{
+    if(editingId){
+      await db.collection(cfg.collection).doc(editingId).update(data);
+      toast(cfg.title+' updated'); logActivity('Updated '+cfg.title+' '+editingId);
+    }else{
+      if(cfg.numberField){ data[cfg.numberField] = await getNextNumber(cfg.prefix); }
+      data.createdBy = state.name; data.createdByUid = state.uid;
+      data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      await db.collection(cfg.collection).add(data);
+      toast(cfg.title+' added'); logActivity('Added '+cfg.title);
+    }
+    if(cfg.afterSave) cfg.afterSave(!editingId, data);
+    bootstrap.Modal.getInstance(document.getElementById('genericModal')).hide();
+  }catch(e){ toast(e.message,'danger'); }
+}
+
+function deleteDoc(key,id){
+  if(!confirm('Delete this record?')) return;
+  db.collection(MODULES[key].collection).doc(id).delete().then(()=>{
+    toast('Deleted'); logActivity('Deleted from '+MODULES[key].title);
+  });
+}
+
+function exportCSV(key){
+  const cfg=MODULES[key]; const rows=state[key]||[];
+  let csv = cfg.columns.map(c=>c.l).join(',')+'\n';
+  rows.forEach(r=>{ csv += cfg.columns.map(c=>'"'+(r[c.k]||'')+'"').join(',')+'\n'; });
+  const blob=new Blob([csv],{type:'text/csv'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=key+'.csv'; a.click();
+}
+function printModule(key){
+  const el=document.getElementById('view-'+key);
+  const w=window.open('','_blank'); w.document.write('<html><head><title>Print</title>'+
+    '<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"></head><body class="p-3">'+el.innerHTML+'</body></html>');
+  w.document.close(); setTimeout(()=>w.print(),400);
+}
+
+/* ============================================================
+   DOCUMENT MANAGEMENT
+   Applies to Purchase Orders and Quotations (any module whose
+   MODULES[key].docType is defined). Files are stored in Google
+   Drive via a Google Apps Script backend; only metadata (fileId,
+   name, size, links, who/when) is stored on the Firestore record
+   under the field named in docType.field.
+   ============================================================ */
+let docCtx = null; // { key, id }
+
+function clientNameFor(clientCode){
+  const c = state.clients.find(x=>x.clientCode===clientCode);
+  return c ? c.companyName : 'Client';
+}
+function sanitizeForFileName(s){
+  return (s||'').toString().trim().replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'NA';
+}
+function buildDocFileName(cfg, record){
+  const number = record[cfg.docType.numberField] || 'UNKNOWN';
+  const client = clientNameFor(record.clientCode);
+  return cfg.docType.prefix+'_'+sanitizeForFileName(number)+'_'+sanitizeForFileName(client)+'.pdf';
+}
+function isAppsScriptConfigured(){
+  return APPS_SCRIPT_URL && APPS_SCRIPT_URL.indexOf('PASTE_YOUR')!==0;
+}
+
+function openDocManager(key,id){
+  const cfg = MODULES[key];
+  if(!cfg || !cfg.docType) return;
+  docCtx = {key,id};
+  const record = state[key].find(r=>r.id===id);
+  document.getElementById('docModalTitle').innerHTML =
+    '<i class="bi bi-folder2-open me-1"></i> '+esc(cfg.docType.label)+' — '+esc(record[cfg.docType.numberField]||'');
+  renderDocCard();
+  new bootstrap.Modal(document.getElementById('docModal')).show();
+}
+
+function renderDocCard(){
+  const {key,id} = docCtx;
+  const cfg = MODULES[key];
+  const record = state[key].find(r=>r.id===id);
+  const meta = record ? record[cfg.docType.field] : null;
+  const body = document.getElementById('docModalBody');
+
+  if(!isAppsScriptConfigured()){
+    body.innerHTML = `<div class="alert alert-warning small mb-0">
+      Document upload is not configured yet. Open this file's script section, paste your
+      Google Apps Script Web App URL into <code>APPS_SCRIPT_URL</code>, and re-save the CRM file.
+      See SETUP_INSTRUCTIONS.md for the exact steps.</div>`;
+    return;
+  }
+
+  const progressHtml = `
+    <div id="docProgressWrap" class="mt-3 d-none">
+      <div class="d-flex justify-content-between small mb-1"><span>Uploading...</span><span id="docProgressPct">0%</span></div>
+      <div class="progress"><div id="docProgressBar" class="progress-bar bg-primary" style="width:0%"></div></div>
+    </div>`;
+
+  if(meta && meta.fileId){
+    body.innerHTML = `
+      <div class="doc-card">
+        <div class="d-flex align-items-start">
+          <i class="bi bi-file-earmark-pdf-fill doc-icon me-3"></i>
+          <div class="flex-grow-1">
+            <div class="fw-semibold text-break">${esc(meta.fileName)}</div>
+            <div class="small text-muted">${meta.fileSize? (meta.fileSize/1024/1024).toFixed(2)+' MB' : ''}</div>
+          </div>
+        </div>
+        <hr>
+        <div class="small text-muted mb-3">
+          <div><i class="bi bi-clock-history me-1"></i>Uploaded: ${esc(fmtDocDate(meta.uploadedAt))} by ${esc(meta.uploadedBy||'-')}</div>
+          <div><i class="bi bi-arrow-repeat me-1"></i>Last Updated: ${esc(fmtDocDate(meta.lastUpdated||meta.uploadedAt))}</div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <button class="btn btn-sm btn-outline-primary" onclick="previewDoc()"><i class="bi bi-eye"></i> Preview</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="downloadDoc()"><i class="bi bi-download"></i> Download</button>
+          <button class="btn btn-sm btn-outline-warning" id="docReplaceBtn" onclick="triggerReplace()"><i class="bi bi-arrow-repeat"></i> Replace</button>
+          <button class="btn btn-sm btn-outline-danger" onclick="deleteDocFile()"><i class="bi bi-trash"></i> Delete</button>
+        </div>
+      </div>
+      <input type="file" id="docFileInput" accept="application/pdf,.pdf" class="d-none" onchange="handleFileSelected()">
+      ${progressHtml}`;
+  } else {
+    body.innerHTML = `
+      <div class="doc-empty" onclick="document.getElementById('docFileInput').click()" style="cursor:pointer;">
+        <i class="bi bi-cloud-arrow-up fs-1 d-block mb-2"></i>
+        <div class="mb-2">No document uploaded yet</div>
+        <button class="btn btn-primary btn-sm" id="docUploadBtn" onclick="event.stopPropagation();document.getElementById('docFileInput').click()">
+          <i class="bi bi-upload"></i> Upload PDF
+        </button>
+        <div class="small text-muted mt-2">PDF only, up to 20 MB</div>
+      </div>
+      <input type="file" id="docFileInput" accept="application/pdf,.pdf" class="d-none" onchange="handleFileSelected()">
+      ${progressHtml}`;
+  }
+}
+
+function fmtDocDate(iso){
+  if(!iso) return '-';
+  try{ return new Date(iso).toLocaleString('en-IN'); }catch(e){ return iso; }
+}
+
+function previewDoc(){
+  const {key,id}=docCtx; const cfg=MODULES[key];
+  const record = state[key].find(r=>r.id===id);
+  const meta = record[cfg.docType.field];
+  if(meta && meta.viewUrl) window.open(meta.viewUrl,'_blank');
+  else toast('No document available to preview','danger');
+}
+function downloadDoc(){
+  const {key,id}=docCtx; const cfg=MODULES[key];
+  const record = state[key].find(r=>r.id===id);
+  const meta = record[cfg.docType.field];
+  if(meta && meta.downloadUrl){
+    const a=document.createElement('a'); a.href=meta.downloadUrl; a.target='_blank'; a.rel='noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  } else toast('No document available to download','danger');
+}
+function triggerReplace(){
+  if(!confirm('Replace existing document? The old file will be removed from Google Drive.')) return;
+  document.getElementById('docFileInput').click();
+}
+
+function deleteDocFile(){
+  if(!confirm('Delete this document permanently? This cannot be undone.')) return;
+  const {key,id}=docCtx; const cfg=MODULES[key];
+  const record = state[key].find(r=>r.id===id);
+  const meta = record[cfg.docType.field];
+  if(!meta || !meta.fileId){ toast('No document to delete','danger'); return; }
+  if(!navigator.onLine){ toast('You appear to be offline. Please check your internet connection.','danger'); return; }
+
+  callAppsScript({action:'delete', fileId: meta.fileId})
+    .then(res=>{
+      if(res && res.success){
+        const update={}; update[cfg.docType.field] = firebase.firestore.FieldValue.delete();
+        return db.collection(cfg.collection).doc(id).update(update).then(()=>{
+          toast('Document deleted');
+          logActivity('Deleted '+cfg.docType.label+' for '+(record[cfg.docType.numberField]||id));
+          record[cfg.docType.field]=null;
+          renderDocCard();
+        });
+      } else {
+        toast('Delete failed: '+(res&&res.error?res.error:'Google Drive did not confirm the delete'),'danger');
+      }
+    })
+    .catch(err=>{
+      toast('Delete failed. Google Drive may be unavailable: '+err.message,'danger');
+    });
+}
+
+function handleFileSelected(){
+  const input = document.getElementById('docFileInput');
+  const file = input.files && input.files[0];
+  if(!file) return;
+
+  const nameLower = (file.name||'').toLowerCase();
+  const isPdf = file.type === 'application/pdf' || nameLower.endsWith('.pdf');
+  if(!isPdf){ toast('Only PDF files are allowed','danger'); input.value=''; return; }
+  if(file.size > MAX_DOC_SIZE_BYTES){ toast('File exceeds the 20 MB limit','danger'); input.value=''; return; }
+  if(!navigator.onLine){ toast('No internet connection. Please reconnect and try again.','danger'); input.value=''; return; }
+  if(!isAppsScriptConfigured()){ toast('Document upload is not configured yet.','danger'); return; }
+
+  const {key,id}=docCtx; const cfg=MODULES[key];
+  const record = state[key].find(r=>r.id===id);
+  const fileName = buildDocFileName(cfg, record);
+  const oldMeta = record[cfg.docType.field];
+  const oldFileId = oldMeta ? oldMeta.fileId : null;
+
+  const reader = new FileReader();
+  reader.onload = function(){
+    const base64 = reader.result.split(',')[1];
+    uploadDocument({
+      action: oldFileId ? 'replace' : 'upload',
+      oldFileId: oldFileId || null,
+      fileName, base64, mimeType:'application/pdf',
+      category: cfg.docType.category, uploadedBy: state.name
+    });
+  };
+  reader.onerror = function(){ toast('Failed to read the selected file','danger'); };
+  reader.readAsDataURL(file);
+}
+
+function uploadDocument(payload){
+  const wrap = document.getElementById('docProgressWrap');
+  const bar = document.getElementById('docProgressBar');
+  const pct = document.getElementById('docProgressPct');
+  wrap.classList.remove('d-none'); bar.style.width='0%'; pct.textContent='0%';
+  const btn = document.getElementById('docUploadBtn') || document.getElementById('docReplaceBtn');
+  if(btn) btn.disabled = true;
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', APPS_SCRIPT_URL, true);
+  xhr.setRequestHeader('Content-Type','text/plain;charset=utf-8'); // avoids CORS preflight against Apps Script
+  xhr.upload.onprogress = function(e){
+    if(e.lengthComputable){
+      const p = Math.round((e.loaded/e.total)*100);
+      bar.style.width=p+'%'; pct.textContent=p+'%';
+    }
+  };
+  xhr.onload = function(){
+    if(btn) btn.disabled=false;
+    let res;
+    try{ res = JSON.parse(xhr.responseText); }
+    catch(e){ toast('Upload failed: unexpected response from Google Drive service','danger'); wrap.classList.add('d-none'); return; }
+
+    if(xhr.status>=200 && xhr.status<300 && res && res.success){
+      const {key,id}=docCtx; const cfg=MODULES[key];
+      const meta = {
+        fileId: res.fileId, fileName: res.fileName, fileSize: res.fileSize,
+        viewUrl: res.viewUrl, downloadUrl: res.downloadUrl,
+        uploadedAt: res.uploadedAt, uploadedBy: res.uploadedBy || payload.uploadedBy,
+        lastUpdated: new Date().toISOString()
+      };
+      const update={}; update[cfg.docType.field]=meta;
+      db.collection(cfg.collection).doc(id).update(update).then(()=>{
+        toast('Document uploaded successfully');
+        logActivity((payload.action==='replace'?'Replaced ':'Uploaded ')+cfg.docType.label+' for '+ (state[key].find(r=>r.id===id)[cfg.docType.numberField]||id));
+        const record = state[key].find(r=>r.id===id);
+        record[cfg.docType.field]=meta;
+        renderDocCard();
+      }).catch(err=>{
+        toast('Uploaded to Drive, but saving to CRM failed: '+err.message,'danger');
+      });
+    } else {
+      toast('Upload failed: '+(res&&res.error? res.error : 'Google Drive returned an error'),'danger');
+      wrap.classList.add('d-none');
+    }
+  };
+  xhr.onerror = function(){
+    if(btn) btn.disabled=false;
+    toast('Upload failed. Google Drive may be unavailable — please check your connection.','danger');
+    wrap.classList.add('d-none');
+  };
+  xhr.send(JSON.stringify(payload));
+}
+
+function callAppsScript(payload){
+  return fetch(APPS_SCRIPT_URL, {
+    method:'POST',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify(payload)
+  }).then(r=>{
+    if(!r.ok) throw new Error('Server responded with status '+r.status);
+    return r.json();
+  });
+}
+
+/* ================= AUTO SALES COMMISSION ================= */
+async function autoCreateSalesCommission(mc){
+  const po = state.purchaseOrders.find(p=>p.poNumber===mc.poNumber);
+  const client = po ? state.clients.find(c=>c.clientCode===po.clientCode) : null;
+  const salesUid = client ? client.assignedSalesUid : '';
+  if(!salesUid) return;
+  const existing = state.salesCommission.find(s=>s.poNumber===mc.poNumber && s.salesPersonUid===salesUid);
+  const pct = state.settings.salesCommissionPercent || 10;
+  const amount = (+mc.receivedAmount||0) * (pct/100);
+  const salesUser = state.users.find(u=>u.id===salesUid);
+  if(existing){
+    await db.collection('salesCommission').doc(existing.id).update({
+      commissionAmount: amount, balance: amount-(+existing.paidAmount||0)
+    });
+  }else{
+    const voucherNo = await getNextNumber('SC');
+    await db.collection('salesCommission').add({
+      commissionVoucherNo:voucherNo, salesPersonUid:salesUid, salesPersonName:salesUser?salesUser.name:'',
+      poNumber:mc.poNumber, totalBoxes:mc.totalBoxes||0, commissionPercent:pct, commissionAmount:amount,
+      paidAmount:0, balance:amount, status:'Pending', createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }
+  pushNotification('Sales commission auto-calculated for PO '+mc.poNumber);
+}
+
+/* ================= DASHBOARD ================= */
+function renderDashboard(){
+  const k = [
+    {label:'Total Clients', num:state.clients.length},
+    {label:'Pending Requirements', num:state.requirements.filter(r=>r.status==='Pending').length},
+    {label:'Quotes Pending', num:state.quotations.filter(q=>q.status==='Draft'||q.status==='Sent').length},
+    {label:'PO Received', num:state.purchaseOrders.length},
+    {label:'Orders Running', num:state.production.filter(p=>p.stage!=='Completed').length},
+    {label:'Completed Orders', num:state.production.filter(p=>p.stage==='Completed').length},
+    {label:'Commission Pending', num: fmtMoney(state.manCommission.reduce((s,x)=>s+(+x.balance||0),0))},
+    {label:'Commission Received', num: fmtMoney(state.manCommission.reduce((s,x)=>s+(+x.receivedAmount||0),0))},
+  ];
+  document.getElementById('kpiRow').innerHTML = k.map(x=>`
+    <div class="col-6 col-md-3"><div class="kpi-card p-3"><div class="num">${x.num}</div><div class="label">${x.label}</div></div></div>`).join('');
+  drawCharts();
+  document.getElementById('recentActivity').innerHTML = state.activityLogs.slice(0,8).map(a=>
+    `<div class="border-bottom py-1"><b>${esc(a.user)}</b> — ${esc(a.action)}</div>`).join('') || 'No activity yet.';
+}
+function fmtMoney(n){ return '₹'+Number(n||0).toLocaleString('en-IN'); }
+
+let chartMonthly, chartCommission;
+function drawCharts(){
+  const byMonth={};
+  state.purchaseOrders.forEach(p=>{
+    const d=p.poDate||''; const m=d? d.slice(0,7): 'Unknown';
+    byMonth[m]=(byMonth[m]||0)+(+p.poAmount||0);
+  });
+  const labels=Object.keys(byMonth).sort();
+  const data=labels.map(l=>byMonth[l]);
+  const ctx1=document.getElementById('chartMonthly').getContext('2d');
+  if(chartMonthly) chartMonthly.destroy();
+  chartMonthly = new Chart(ctx1,{type:'bar',data:{labels,datasets:[{label:'PO Value',data,backgroundColor:'#1660a7'}]},options:{plugins:{legend:{display:false}}}});
+
+  const received = state.manCommission.reduce((s,x)=>s+(+x.receivedAmount||0),0);
+  const pending = state.manCommission.reduce((s,x)=>s+(+x.balance||0),0);
+  const ctx2=document.getElementById('chartCommission').getContext('2d');
+  if(chartCommission) chartCommission.destroy();
+  chartCommission = new Chart(ctx2,{type:'doughnut',data:{labels:['Received','Pending'],datasets:[{data:[received,pending],backgroundColor:['#198754','#ffc107']}]}});
+}
+
+/* ================= LEDGER / ACCOUNTS ================= */
+function renderLedger(type){
+  document.querySelectorAll('#acctTabs .nav-link').forEach(a=>a.classList.remove('active'));
+  event && event.target && event.target.classList.add('active');
+  let head=[], rows=[];
+  if(type==='client'){
+    head=['Client','PO Number','Order Value','Status'];
+    rows = state.purchaseOrders.map(p=>[p.clientCode, p.poNumber, fmtMoney(p.poAmount), p.status]);
+  } else if(type==='manufacturer'){
+    head=['Manufacturer','PO Number','Commission Amount','Received','Balance','Status'];
+    rows = state.manCommission.map(m=>[m.manufacturerCode,m.poNumber,fmtMoney(m.commissionAmount),fmtMoney(m.receivedAmount),fmtMoney(m.balance),m.status]);
+  } else {
+    head=['Sales Person','PO Number','Commission Amount','Paid','Balance','Status'];
+    rows = state.salesCommission.map(s=>[s.salesPersonName,s.poNumber,fmtMoney(s.commissionAmount),fmtMoney(s.paidAmount),fmtMoney(s.balance),s.status]);
+  }
+  document.getElementById('ledgerHead').innerHTML = head.map(h=>'<th>'+h+'</th>').join('');
+  document.getElementById('ledgerBody').innerHTML = rows.map(r=>'<tr>'+r.map(c=>'<td>'+esc(c)+'</td>').join('')+'</tr>').join('') || '<tr><td colspan="6" class="text-center text-muted">No data</td></tr>';
+}
+
+/* ================= REPORTS ================= */
+function renderReport(){
+  const key = document.getElementById('reportPicker').value;
+  const cfg = MODULES[key];
+  document.getElementById('reportHead').innerHTML = cfg.columns.map(c=>'<th>'+c.l+'</th>').join('');
+  document.getElementById('reportBody').innerHTML = (state[key]||[]).map(r=>
+    '<tr>'+cfg.columns.map(c=>'<td>'+esc(r[c.k])+'</td>').join('')+'</tr>').join('') || '<tr><td class="text-center text-muted">No data</td></tr>';
+}
+function exportReportCSV(){ exportCSV(document.getElementById('reportPicker').value); }
+function printReport(){ printModule && window.print(); }
+
+/* ================= NOTIFICATIONS / LOGS ================= */
+function renderNotifList(){
+  document.getElementById('notifList').innerHTML = state.notifications.slice(0,50).map(n=>
+    `<div class="list-group-item"><div class="small text-muted">${n.ts&&n.ts.toDate? n.ts.toDate().toLocaleString():''}</div>${esc(n.text)}</div>`).join('') || '<div class="text-muted p-2">No notifications</div>';
+  db.collection('notifications').get().then(snap=>{});
+  document.getElementById('notifDot').classList.add('d-none');
+}
+function renderActivityLogs(){
+  document.getElementById('activityLogsBody').innerHTML = state.activityLogs.map(a=>
+    `<tr><td>${a.ts&&a.ts.toDate? a.ts.toDate().toLocaleString():''}</td><td>${esc(a.user)}</td><td>${esc(a.action)}</td></tr>`).join('');
+}
+function saveSettings(){
+  const pct = +document.getElementById('setSalesPct').value || 10;
+  db.collection('settings').doc('general').set({salesCommissionPercent:pct},{merge:true}).then(()=>toast('Settings saved'));
+}
+
+/* ================= LISTENERS ================= */
+function initListeners(){
+  const bind = (col, key) => db.collection(col).onSnapshot(snap=>{
+    state[key] = snap.docs.map(d=>({id:d.id,...d.data()}));
+    if(currentView===key) renderTable(key,'');
+    if(currentView==='dashboard') renderDashboard();
+    if(currentView==='accounts') renderLedger('client');
+    if(currentView==='reports') renderReport();
+  });
+  bind('clients','clients'); bind('requirements','requirements'); bind('manufacturers','manufacturers');
+  bind('quotations','quotations'); bind('purchaseOrders','purchaseOrders'); bind('production','production');
+  bind('dispatch','dispatch'); bind('payments','payments'); bind('manCommission','manCommission');
+  bind('salesCommission','salesCommission');
+  db.collection('users').onSnapshot(snap=>{ state.users = snap.docs.map(d=>({id:d.id,...d.data()})); if(currentView==='users') renderTable('users',''); });
+  db.collection('notifications').orderBy('ts','desc').limit(50).onSnapshot(snap=>{
+    state.notifications = snap.docs.map(d=>({id:d.id,...d.data()}));
+    document.getElementById('notifDot').classList.toggle('d-none', state.notifications.length===0);
+    if(currentView==='notifications') renderNotifList();
+  });
+  db.collection('activityLogs').orderBy('ts','desc').limit(50).onSnapshot(snap=>{
+    state.activityLogs = snap.docs.map(d=>({id:d.id,...d.data()}));
+    if(currentView==='dashboard') renderDashboard();
+    if(currentView==='activityLogs') renderActivityLogs();
+  });
+  db.collection('settings').doc('general').onSnapshot(doc=>{ if(doc.exists) state.settings = doc.data(); });
+}
+</script>
+</body>
+</html>
