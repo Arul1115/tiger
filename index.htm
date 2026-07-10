@@ -950,7 +950,12 @@ function uploadDocument(payload){
 
   const xhr = new XMLHttpRequest();
   xhr.open('POST', APPS_SCRIPT_URL, true);
-  xhr.setRequestHeader('Content-Type','text/plain;charset=utf-8'); // avoids CORS preflight against Apps Script
+  // IMPORTANT: do NOT call setRequestHeader here. Apps Script Web Apps don't
+  // implement an OPTIONS handler, so setting any header (even Content-Type:
+  // text/plain) makes Chrome send a CORS preflight that Apps Script can't
+  // answer, and the whole request gets blocked. Leaving headers untouched
+  // means the browser sends the default "text/plain;charset=UTF-8" content
+  // type for a string body, which stays a "simple" request and skips preflight.
   xhr.upload.onprogress = function(e){
     if(e.lengthComputable){
       const p = Math.round((e.loaded/e.total)*100);
@@ -995,9 +1000,10 @@ function uploadDocument(payload){
 }
 
 function callAppsScript(payload){
+  // No custom headers here either — same CORS-preflight reason as the
+  // upload XHR above. A plain string body keeps this a "simple" request.
   return fetch(APPS_SCRIPT_URL, {
     method:'POST',
-    headers:{'Content-Type':'text/plain;charset=utf-8'},
     body: JSON.stringify(payload)
   }).then(r=>{
     if(!r.ok) throw new Error('Server responded with status '+r.status);
